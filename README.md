@@ -1,5 +1,6 @@
 # FileVault 
 A local command-line interface (CLI) that enables users to easily upload, list, retrieve, and delete files using intuitive command-style inputs.
+Built for the GDGoC Backend Student Club
 ## Week 1 - Building the CLI
 This milestone initiates the  You will implement this CLI leveraging the Command Pattern for a clean, modular structure and routing, while establishing a foundational data storage layer and clearly separating core business logic into a dedicated service layer.
 ## Metadata database schema
