@@ -18,13 +18,15 @@ func NewCommandRouter(fs *services.FileService) *CommandRouter {
 		commands: make(map[string]commands.ICommand),
 	}
 	uploadCmd := commands.NewUploadCommand(fs)
-
+	listCmd := commands.NewListCommand(fs)
 	// Test the command directly
 	fmt.Printf("Upload command name: %s\n", uploadCmd.Name())
 	fmt.Printf("Upload command help: %s\n", uploadCmd.HelpContent())
 
 	router.RegisterCommand(uploadCmd)
+	router.RegisterCommand(listCmd)
 	router.RegisterCommand(&HelpCommand{router: router})
+	
 	return router
 }
 

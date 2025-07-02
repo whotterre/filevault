@@ -3,6 +3,8 @@ package services
 import (
 	"encoding/json"
 	"errors"
+	"filevault/utils"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -22,6 +24,7 @@ var (
 	ErrMetadataJSONMarshal = errors.New("Failed to convert metadata to JSON")
 	ErrJSONUnmarshal       = errors.New("Failed to unmarshal data")
 	ErrFileUpload          = errors.New("Failed to upload file to filesystem")
+	ErrFileNotExistent     = errors.New("File doesn't exist")
 )
 
 type FileService struct {
@@ -138,6 +141,49 @@ func (s *FileService) UploadFile(pathname string) error {
 	err = os.WriteFile("./storage/metadata.json", updatedMetadata, 0644)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *FileService) ListUploaded() error {
+	// Check if the metadata.json file
+	const pathName = "./storage/metadata.json"
+	fileExists := true
+	osStat, err := os.Stat(pathName)
+	if err != nil {
+		fileExists = false
+	}
+	if !fileExists || osStat.IsDir() {
+		return ErrInvalidFileFormat
+	}
+
+	// Read the file content
+	fileContent, err := os.ReadFile("./storage/metadata.json")
+	if err != nil {
+		return err
+	}
+	// File metadata
+	fileMetadata := []FileMetadata{}
+
+	// Unmarshal/Parse the JSON
+	err = json.Unmarshal(fileContent, &fileMetadata)
+	if err != nil {
+		return err
+	}
+	// Print table header
+	fmt.Println("ID                                   | Name                   | Size      | Uploaded At")
+	fmt.Println("-------------------------------------+------------------------+-----------+--------------------") 
+	if len(fileMetadata) == 0 {
+		fmt.Println("No entries found in metadata.json")
+		return nil
+	}
+	for _, entry := range fileMetadata {
+		fmt.Printf("%-36s | %-22s | %-9s | %s\n",
+			entry.FileId,
+			entry.FileName,
+			utils.GetSizeField(entry.Size),
+			entry.UploadedAt,
+		)
 	}
 	return nil
 }
