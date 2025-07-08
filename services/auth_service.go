@@ -7,6 +7,7 @@ import (
 	"errors"
 	"filevault/utils"
 	"fmt"
+	"os"
 	"time"
 
 	"context"
@@ -20,6 +21,7 @@ var (
 	ErrNoEmailProvided = errors.New("No email provided")
 	ErrNoPasswordProvided = errors.New("No password provided")
 	ErrUserAlreadyExists = errors.New("User already exists")
+	ErrSessionFileNotFound = errors.New("Session file not foundd")
 )
 
 type AuthService struct {
@@ -113,6 +115,49 @@ func (s *AuthService) Login(email, password string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create session: %w", err)
 		}
+		// Store this "state" that the token represents in a file
+		file, err := os.Create("./vault_session")
+		if err != nil {
+			return errors.New("Session file not created")
+		}
+		defer file.Close()
+		_, err = file.WriteString(sessionID)
+		if err != nil {
+			return errors.New("Something went wrong while writing the token to your session file")
+		}
+
 		fmt.Printf("Login successful. Your session ID is: %s\n", sessionID)
 		return nil
+}
+
+func (s *AuthService) Logout() error {
+	sessionFilePath := "./vault_session"
+	sessionIDBytes, err := os.ReadFile(sessionFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrSessionFileNotFound
+		}
+		return fmt.Errorf("failed to read session file %s: %w", sessionFilePath, err)
+	}
+	sessionID := string(sessionIDBytes)
+	delCount, err := s.client.Del(context.Background(), sessionID).Result()
+	if err != nil {
+		return fmt.Errorf("failed to delete session from Redis: %w", err)
+	}
+	if delCount == 0 {
+		// This means the session ID was not found in Redis, perhaps it expired or was already deleted.
+		fmt.Printf("Warning: Session ID '%s' not found in Redis, might have expired or already been logged out.\n", sessionID)
+	}
+
+	err = os.Remove(sessionFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File might have been manually deleted already, which is fine for logout.
+			fmt.Printf("Warning: Session file '%s' already removed locally.\n", sessionFilePath)
+		} else {
+			return fmt.Errorf("failed to delete local session file %s: %w", sessionFilePath, err)
+		}
+	}
+	fmt.Println("Logged out successfully.")
+	return nil
 }
