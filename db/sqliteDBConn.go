@@ -1,43 +1,43 @@
 package db
 
 import (
-    "database/sql"
-    _ "github.com/mattn/go-sqlite3"
+	"database/sql"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func GetSQLiteDBConn() (*sql.DB, error) {
-    conn, err := sql.Open("sqlite3", "filevault.db")
-    if err != nil {
-        return nil, err
-    }
+	conn, err := sql.Open("sqlite3", "filevault.db")
+	if err != nil {
+		return nil, err
+	}
 
-    // Create users table
-    _, err = conn.Exec(`
+	// Create users table
+	_, err = conn.Exec(`
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
+            id TEXT PRIMARY KEY,
             email TEXT UNIQUE,
-            password TEXT,
-            file_id INTEGER REFERENCES files(id) ON DELETE CASCADE
+            password TEXT
         );
     `)
-    if err != nil {
-        return nil, err
-    }
+	if err != nil {
+		return nil, err
+	}
 
-    // Create files table
-    _, err = conn.Exec(`
-        CREATE TABLE IF NOT EXISTS files (
+	// Create files table
+	_, err = conn.Exec(`
+       CREATE TABLE IF NOT EXISTS files (
             id TEXT PRIMARY KEY,
-            user_id INTEGER,
+            user_id TEXT,
             file_name TEXT,
             file_path TEXT,
             size TEXT,
-            uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         );
     `)
-    if err != nil {
-        return nil, err
-    }
+	if err != nil {
+		return nil, err
+	}
 
-    return conn, nil
+	return conn, nil
 }

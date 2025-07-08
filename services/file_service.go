@@ -43,8 +43,11 @@ type FileMetadata struct {
 
 }
 
-func NewFileService(db *sql.DB) *FileService {
-	return &FileService{db:db}
+func NewFileService(db *sql.DB, conn *redis.Client) *FileService {
+	return &FileService{
+		db:db,
+		conn: conn,
+	}
 }
 
 // UploadFiles uploads files to the server.
@@ -56,6 +59,12 @@ func (s *FileService) UploadFile(pathname string) error {
 	// If it doesn't exist, create it.
 	// Then extract the file metadata, generate UUID for file and then upload the file
 	// Returning it's UUID
+
+	// Ensure user is logged in 
+	if !utils.ValidateUser(s.conn) {
+		return errors.New("user is not logged in")
+	}
+
 	if pathname == "" {
 		return ErrMissingPathname
 	}
@@ -98,6 +107,17 @@ func (s *FileService) UploadFile(pathname string) error {
 	}
 	defer destinationFile.Close()
 
+	// Get user ID from the key value pair [sessionToken -> userId]
+	sessionToken, err := utils.GetSessionTokenFromFile()
+	if err != nil {
+		return fmt.Errorf("failed to get session token: %w", err)
+	}
+	// Get user ID by session token
+	userId, err := utils.GetUserID(sessionToken, s.conn, s.db)
+	if err != nil {
+		return fmt.Errorf("failed to get user ID: %w", err)
+	}
+
 	// Store the metadata of the file in metadata.json
 	fileMetadata := FileMetadata{
 		FileId:     uuid.New().String(),
@@ -107,12 +127,12 @@ func (s *FileService) UploadFile(pathname string) error {
 		UploadedAt: time.Now(),
 	}
 	// Add database record of metadata
-	fileRecord, err := s.db.Prepare("INSERT INTO files (id, file_name, size, file_path, uploaded_at) VALUES (?, ?, ?, ?, ?)")
+	fileRecord, err := s.db.Prepare("INSERT INTO files (id, file_name, user_id, size, file_path, uploaded_at) VALUES (?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare database statement: %w", err)
 	}
 	defer fileRecord.Close()
-	_, err = fileRecord.Exec(fileMetadata.FileId, fileMetadata.FileName, fileMetadata.Size, fileMetadata.Path, fileMetadata.UploadedAt)
+	_, err = fileRecord.Exec(fileMetadata.FileId, fileMetadata.FileName, userId, fileMetadata.Size, fileMetadata.Path, fileMetadata.UploadedAt)
 	if err != nil {
 		return fmt.Errorf("failed to execute database statement: %w", err)
 	}
@@ -161,6 +181,12 @@ func (s *FileService) UploadFile(pathname string) error {
 
 func (s *FileService) ListUploaded() error {
 	// Check if the metadata.json file
+
+	// Ensure user is logged in 
+	if !utils.ValidateUser(s.conn) {
+		return errors.New("user is not logged in")
+	}
+
 	const pathName = "./storage/metadata.json"
 	fileExists := true
 	osStat, err := os.Stat(pathName)
@@ -203,6 +229,12 @@ func (s *FileService) ListUploaded() error {
 }
 
 func (s *FileService) DeleteFile(fileId string) error {
+
+	// Ensure user is logged in 
+	if !utils.ValidateUser(s.conn) {
+		return errors.New("user is not logged in")
+	}
+
 	// Ensure the fileId was passed
 	if fileId == "" {
 		fmt.Print("Error fileID wasn't passed")

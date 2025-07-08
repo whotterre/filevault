@@ -54,12 +54,12 @@ func (s *AuthService) Register(email, password string) error {
 	}
 
 	// Hash password (with PBKDF2)
-	println("Hello", password)
 	hash := pbkdf2.Key([]byte(password), []byte("salt"), 1000, 32, sha256.New)
 	hashedPassword := hex.EncodeToString(hash)
+	userID := utils.GenerateRandomString(16)
 	// Store user in the database 
-	query := "INSERT INTO users (email, password) VALUES (?, ?)"
-	_, err = s.conn.ExecContext(context.Background(), query, email, hashedPassword)
+	query := "INSERT INTO users (id, email, password) VALUES (?, ?, ?)"
+	_, err = s.conn.ExecContext(context.Background(), query, userID, email, hashedPassword)
 	if err != nil {
 		if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.Code == sqlite3.ErrConstraint {
 			return ErrUserAlreadyExists

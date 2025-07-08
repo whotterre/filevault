@@ -31,7 +31,7 @@ func main() {
 		fmt.Printf("Error connecting to Redis: %v\n", err)
 		return
 	}
-	fileService := services.NewFileService(dbConn)
+	fileService := services.NewFileService(dbConn, redisClient)
 	authService := services.NewAuthService(dbConn, redisClient)
 	cm := cli.NewCommandRouter(fileService, authService)
 
