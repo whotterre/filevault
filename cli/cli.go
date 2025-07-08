@@ -22,7 +22,6 @@ func Help() {
 	println("  read    - Displays metadata for a specific file")
 	println("  vault   - Manage vaults")
 	println("  upload <filepath> - Manage files in vaults")
-	println("  settings- Configure application settings")
 }
 
 // Display exit message

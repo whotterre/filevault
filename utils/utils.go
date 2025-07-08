@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"math"
+	"math/rand"
 )
 
 
@@ -27,4 +28,13 @@ func GetSizeField(byteSize int64) string {
 		return fmt.Sprintf("%d %s", byteSize, units[i])
 	}
 	return fmt.Sprintf("%.1f %s", fileSize, units[i])
+}
+
+func GenerateRandomString(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	result := make([]byte, length)
+	for i := range result {
+		result[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(result)
 }

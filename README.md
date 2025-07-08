@@ -9,8 +9,22 @@ FileVault is a powerful local command-line interface (CLI) designed to simplify 
 ### Week 1 - Building the CLI
 
 This milestone focuses on laying the groundwork for FileVault. You'll be implementing the CLI using the **Command Pattern** for a clean, modular structure and efficient command routing. We'll also establish a foundational **data storage layer** and ensure a clear separation of core business logic into a dedicated **service layer**.
-
 -----
+
+Commands for Week 1
+- Upload a file - vault upload <filepath>
+- List uploaded files - vault list 
+- Display a help menu showing the available commands
+- Delete an uploaded file - vault delete <fileId>
+
+# Week 2: CLI II
+Extension of CLI to  a multi-user file system with:
+- User registration and login
+- Session/token management
+- Per-user file ownership
+- Access control enforcement​
+Using Redis
+
 
 ## 📂 Project Structure
 

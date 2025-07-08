@@ -13,13 +13,18 @@ type CommandRouter struct {
 	commands map[string]commands.ICommand
 }
 
-func NewCommandRouter(fs *services.FileService) *CommandRouter {
+func NewCommandRouter(fs *services.FileService, as *services.AuthService) *CommandRouter {
 	router := &CommandRouter{
 		commands: make(map[string]commands.ICommand),
 	}
+	
+
+
+
 	uploadCmd := commands.NewUploadCommand(fs)
 	listCmd := commands.NewListCommand(fs)
 	deleteCmd := commands.NewDeleteCommand(fs)
+	registerCmd := commands.NewRegisterCommand(as)
 	// Test the command directly
 	fmt.Printf("Upload command name: %s\n", uploadCmd.Name())
 	fmt.Printf("Upload command help: %s\n", uploadCmd.HelpContent())
@@ -27,6 +32,7 @@ func NewCommandRouter(fs *services.FileService) *CommandRouter {
 	router.RegisterCommand(uploadCmd)
 	router.RegisterCommand(listCmd)
 	router.RegisterCommand(deleteCmd)
+	router.RegisterCommand(registerCmd)
 	router.RegisterCommand(&HelpCommand{router: router})
 	
 	return router

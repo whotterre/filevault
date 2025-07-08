@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"filevault/cli"
+	"filevault/db"
 	"filevault/services"
 	"fmt"
 	"os"
@@ -18,7 +19,21 @@ func main() {
 	// Get user input
 	scanner := bufio.NewScanner(os.Stdin)
 	fileService := services.NewFileService()
-	cm := cli.NewCommandRouter(fileService)
+	// Connect to backing stores
+	// SQLite3 backing store
+	dbConn, err := db.GetSQLiteDBConn()
+	if err != nil {
+		fmt.Printf("Error connecting to database: %v\n", err)
+		return 
+	}
+	// Redis backing store
+	redisClient, err := db.GetRedisClient()
+	if err != nil {
+		fmt.Printf("Error connecting to Redis: %v\n", err)
+		return
+	}
+	authService := services.NewAuthService(dbConn, redisClient)
+	cm := cli.NewCommandRouter(fileService, authService)
 
 	for {
 		// Prompt for input
@@ -58,6 +73,7 @@ func main() {
 				args := parts[2:]
 
 				err := cm.ExecuteCommand(commandName, args)
+				println(args)
 				if err != nil {
 					cli.Error(err)
 					continue
