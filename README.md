@@ -23,7 +23,9 @@ Extension of CLI to  a multi-user file system with:
 - Session/token management
 - Per-user file ownership
 - Access control enforcement​
-Using Redis
+Using Redis for session management
+PBKDF2 for password hashing (with SHA256 algo)
+SQLite3 as the backing store for user identity data
 
 
 ## 📂 Project Structure

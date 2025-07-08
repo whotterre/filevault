@@ -73,7 +73,6 @@ func main() {
 				args := parts[2:]
 
 				err := cm.ExecuteCommand(commandName, args)
-				println(args)
 				if err != nil {
 					cli.Error(err)
 					continue
