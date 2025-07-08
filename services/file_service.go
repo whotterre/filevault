@@ -172,7 +172,7 @@ func (s *FileService) ListUploaded() error {
 	}
 	// Print table header
 	fmt.Println("ID                                   | Name                   | Size      | Uploaded At")
-	fmt.Println("-------------------------------------+------------------------+-----------+--------------------") 
+	fmt.Println("-------------------------------------+------------------------+-----------+--------------------")
 	if len(fileMetadata) == 0 {
 		fmt.Println("No entries found in metadata.json")
 		return nil
@@ -185,5 +185,73 @@ func (s *FileService) ListUploaded() error {
 			entry.UploadedAt,
 		)
 	}
+	return nil
+}
+
+func (s *FileService) DeleteFile(fileId string) error {
+	// Ensure the fileId was passed
+	if fileId == "" {
+		fmt.Print("Error fileID wasn't passed")
+		return errors.New("file ID is missing")
+	}
+	// Check if the metadata.json file exists
+	metadataPath := "./storage/metadata.json"
+	fileExists := true
+	osStat, err := os.Stat(metadataPath)
+	if err != nil {
+		fileExists = false
+	}
+	if !fileExists || osStat.IsDir() {
+		return ErrInvalidFileFormat
+	}
+
+	// Read the file content
+	fileContent, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return err
+	}
+	// File metadata
+	fileMetadata := []FileMetadata{}
+
+	// Unmarshal/Parse the JSON
+	err = json.Unmarshal(fileContent, &fileMetadata)
+	if err != nil {
+		return err
+	}
+	// Read the metadata file and check if there exists an entry with the fileId
+	for _, x := range fileMetadata {
+		if x.FileId == fileId {
+			// If the file exists, delete it from the filesystem
+			if _, err := os.Stat(x.Path); err == nil {
+				err = os.Remove(x.Path)
+				if err != nil {
+					return ErrFileUpload
+				}
+			} else {
+				return ErrFileNotExistent
+			}
+
+			// Remove the entry from the metadata list
+			for i, entry := range fileMetadata {
+				if entry.FileId == fileId {
+					fileMetadata = append(fileMetadata[:i], fileMetadata[i+1:]...)
+					break
+				}
+			}
+
+			// Write the updated metadata back to the file
+			updatedMetadata, err := json.Marshal(fileMetadata)
+			if err != nil {
+				return ErrMetadataJSONMarshal
+			}
+			err = os.WriteFile("./storage/metadata.json", updatedMetadata, 0644)
+			if err != nil {
+				return ErrDatabaseWriteFail
+			}
+			fmt.Printf("File with ID %s has been deleted successfully\n", fileId)
+			return nil
+		}
+	}
+
 	return nil
 }

@@ -10,7 +10,7 @@ type UploadCommand struct {
 }
 
 // NewUploadCommand creates a new instance of UploadCommand.
-func NewUploadCommand(fileService *services.FileService) *UploadCommand {
+func NewUploadCommand(fileService *services.FileService) ICommand {
 	return &UploadCommand{
 		fileService: fileService,
 	}

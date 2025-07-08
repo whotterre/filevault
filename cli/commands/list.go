@@ -10,7 +10,7 @@ type ListCommand struct {
 	fileService *services.FileService
 }
 
-func NewListCommand(fileService *services.FileService) *ListCommand {
+func NewListCommand(fileService *services.FileService) ICommand {
 	return &ListCommand{
 		fileService: fileService,
 	}

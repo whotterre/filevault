@@ -12,7 +12,6 @@ import (
 func init() {
 	cli.Welcome()
 	cli.Help()
-
 }
 
 func main() {
@@ -20,6 +19,7 @@ func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	fileService := services.NewFileService()
 	cm := cli.NewCommandRouter(fileService)
+
 	for {
 		// Prompt for input
 		cli.Prompt()
@@ -33,21 +33,44 @@ func main() {
 				continue
 			}
 
-			commandName := parts[0]
-			args := parts[1:]
+			// Handle special commands that don't need "vault" prefix
+			if parts[0] == "exit" || parts[0] == "quit" {
+				fmt.Println("Goodbye!")
+				break
+			}
 
-			err := cm.ExecuteCommand(commandName, args)
-			if err != nil {
-				cli.Error(err)
+			if parts[0] == "help" {
+				err := cm.ExecuteCommand("help", parts)
+				if err != nil {
+					cli.Error(err)
+				}
 				continue
 			}
-			fmt.Printf("Command '%s' executed successfully\n", commandName)
+
+			// Handle vault commands
+			if parts[0] == "vault" {
+				if len(parts) < 2 {
+					cli.Error(fmt.Errorf("vault command requires a subcommand. Usage: vault <command> [args...]"))
+					continue
+				}
+
+				commandName := parts[1]
+				args := parts[2:]
+
+				err := cm.ExecuteCommand(commandName, args)
+				if err != nil {
+					cli.Error(err)
+					continue
+				}
+				fmt.Printf("Command '%s' executed successfully\n", commandName)
+			} else {
+				cli.Error(fmt.Errorf("unknown command '%s'. Commands must start with 'vault' (e.g., 'vault upload file.txt')", parts[0]))
+			}
 		}
 
 		if err := scanner.Err(); err != nil {
 			cli.Error(err)
 			break
 		}
-
 	}
 }
