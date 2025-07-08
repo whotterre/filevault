@@ -27,7 +27,7 @@ func GetSQLiteDBConn() (*sql.DB, error) {
     // Create files table
     _, err = conn.Exec(`
         CREATE TABLE IF NOT EXISTS files (
-            id INTEGER PRIMARY KEY,
+            id TEXT PRIMARY KEY,
             user_id INTEGER,
             file_name TEXT,
             file_path TEXT,

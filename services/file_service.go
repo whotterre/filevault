@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"filevault/utils"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 // Errors
@@ -28,6 +30,8 @@ var (
 )
 
 type FileService struct {
+	db *sql.DB
+	conn *redis.Client
 }
 
 type FileMetadata struct {
@@ -39,8 +43,8 @@ type FileMetadata struct {
 
 }
 
-func NewFileService() *FileService {
-	return &FileService{}
+func NewFileService(db *sql.DB) *FileService {
+	return &FileService{db:db}
 }
 
 // UploadFiles uploads files to the server.
@@ -80,7 +84,7 @@ func (s *FileService) UploadFile(pathname string) error {
 	if err != nil {
 		return err
 	}
-	defer uploadedFile.Close() // Close the file to preserve system resources
+	defer uploadedFile.Close()
 	destinationPath := uploadPath + "/" + osStat.Name()
 	destinationFile, err := os.Create(destinationPath)
 	if err != nil {
@@ -101,6 +105,16 @@ func (s *FileService) UploadFile(pathname string) error {
 		Size:       osStat.Size(),
 		Path:       destinationPath,
 		UploadedAt: time.Now(),
+	}
+	// Add database record of metadata
+	fileRecord, err := s.db.Prepare("INSERT INTO files (id, file_name, size, file_path, uploaded_at) VALUES (?, ?, ?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare database statement: %w", err)
+	}
+	defer fileRecord.Close()
+	_, err = fileRecord.Exec(fileMetadata.FileId, fileMetadata.FileName, fileMetadata.Size, fileMetadata.Path, fileMetadata.UploadedAt)
+	if err != nil {
+		return fmt.Errorf("failed to execute database statement: %w", err)
 	}
 
 	// Open metadata.json

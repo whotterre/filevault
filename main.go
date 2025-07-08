@@ -18,7 +18,6 @@ func init() {
 func main() {
 	// Get user input
 	scanner := bufio.NewScanner(os.Stdin)
-	fileService := services.NewFileService()
 	// Connect to backing stores
 	// SQLite3 backing store
 	dbConn, err := db.GetSQLiteDBConn()
@@ -32,6 +31,7 @@ func main() {
 		fmt.Printf("Error connecting to Redis: %v\n", err)
 		return
 	}
+	fileService := services.NewFileService(dbConn)
 	authService := services.NewAuthService(dbConn, redisClient)
 	cm := cli.NewCommandRouter(fileService, authService)
 
