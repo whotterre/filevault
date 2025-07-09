@@ -118,6 +118,14 @@ func (s *FileService) UploadFile(pathname string) error {
 		return fmt.Errorf("failed to get user ID: %w", err)
 	}
 
+	valid, err := utils.CheckIsAuthenticated(sessionToken, userId, s.conn, s.db)
+	if err != nil {
+		return fmt.Errorf("Failed to validate user because %w", err)
+	}
+	if !valid {
+		return fmt.Errorf("User isn't authenticated")
+	}
+
 	// Store the metadata of the file in metadata.json
 	fileMetadata := FileMetadata{
 		FileId:     uuid.New().String(),

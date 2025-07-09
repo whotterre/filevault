@@ -3,14 +3,13 @@ package utils
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"math"
 	"math/rand"
 	"os"
-
-	"github.com/redis/go-redis/v9"
 )
-
 
 func GetSizeField(byteSize int64) string {
 	// Converts the size value to a format like "3.7 MB"
@@ -19,16 +18,16 @@ func GetSizeField(byteSize int64) string {
 	if byteSize < 0 {
 		return "0 B"
 	}
-	// log byteSize / log 1024 - gets the number of times we need to divide to get the unit 
-	i := int(math.Floor(math.Log(float64(byteSize))/ math.Log(float64(1024))))
-	
+	// log byteSize / log 1024 - gets the number of times we need to divide to get the unit
+	i := int(math.Floor(math.Log(float64(byteSize)) / math.Log(float64(1024))))
+
 	if i < 0 {
 		i = 0
 	} else if i >= len(units) {
 		i = len(units) - 1
 	}
 
-	fileSize := float64(byteSize) / math.Pow(1024, float64(i)) 
+	fileSize := float64(byteSize) / math.Pow(1024, float64(i))
 	if i == 0 {
 		return fmt.Sprintf("%d %s", byteSize, units[i])
 	}
@@ -44,10 +43,10 @@ func GenerateRandomString(length int) string {
 	return string(result)
 }
 
-func GetSessionTokenFromFile() (string,error) {
+func GetSessionTokenFromFile() (string, error) {
 	// Get user token from file
 	sessionFilePath := "./vault_session"
-	
+
 	if _, err := os.Stat(sessionFilePath); os.IsNotExist(err) {
 		fmt.Println("Session file does not exist.")
 		return "", err
@@ -59,8 +58,9 @@ func GetSessionTokenFromFile() (string,error) {
 		return "", err
 	}
 	tokenStr := string(token)
-	return tokenStr, nil 
+	return tokenStr, nil
 }
+
 // CheckValidUser checks if the user is valid in Redis
 func ValidateUser(conn *redis.Client) bool {
 	tokenStr, err := GetSessionTokenFromFile()
@@ -77,7 +77,7 @@ func ValidateUser(conn *redis.Client) bool {
 	ctx := context.Background()
 	exists := conn.Exists(ctx, tokenStr).Val()
 	if exists == 0 {
-		fmt.Println("User token does not exist in Redis.")
+		fmt.Println("User session has expired or doesn't exist. Please log in again")
 		return false
 	}
 	return true
@@ -109,4 +109,32 @@ func GetUserID(sessionToken string, conn *redis.Client, dbConn *sql.DB) (string,
 	}
 
 	return id, nil
+}
+
+func CheckIsAuthenticated(sessionToken, userID string, conn *redis.Client, dbConn *sql.DB) (bool, error) {
+	ctx := context.Background()
+	// Check if the user has a session token
+	//
+	email, err := conn.Get(ctx, sessionToken).Result()
+	if err != nil {
+		return false, errors.New("User isn't authenticated as they don't have a session token")
+	}
+
+	// Get user record from the SQLite3 db
+	query := "SELECT id FROM users WHERE email = ?"
+	var id string
+	err = dbConn.QueryRowContext(ctx, query, email).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, errors.New("User doesn't exist")
+		}
+		return false, errors.New("Failed to execute query to check user is registered.")
+	}
+
+	// User exists if a record is found
+	if id == "" {
+		return false, errors.New("User ID not found for email: " + email)
+	}
+	fmt.Println("User is authenticated with ID:", id)
+	return true, nil
 }
