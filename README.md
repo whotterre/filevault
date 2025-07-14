@@ -26,6 +26,24 @@ Using Redis for session management
 PBKDF2 for password hashing (with SHA256 algo)
 SQLite3 as the backing store for user identity data
 
+To run the project at this stage, 
+- You'll need an instance of the Redis server running on your machine
+You can get it from Docker by:
+```bash
+  docker pull redis
+```
+Then, 
+```bash
+  docker run --name my_redis 
+```
+Then,
+```bash
+  docker start my_redis 
+```
+
+
+
+
 
 ## 📂 Project Structure
 
