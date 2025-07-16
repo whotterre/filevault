@@ -1,9 +1,13 @@
 package worker
 
-import "github.com/hibiken/asynq"
+import (
+	// "context"
+
+	"github.com/hibiken/asynq"
+)
 
 type TaskDistributor interface {
-
+	// DistributeThumbnailGen(ctx context.Context, taskID string, filePath string) error
 }
 
 type RedisTaskDistributor struct {
