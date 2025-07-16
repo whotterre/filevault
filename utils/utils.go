@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/redis/go-redis/v9"
 	"math"
 	"math/rand"
 	"os"
+
+	"github.com/redis/go-redis/v9"
 )
 
 func GetSizeField(byteSize int64) string {

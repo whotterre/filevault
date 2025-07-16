@@ -2,17 +2,15 @@ package services
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"errors"
+	"filevault/repositories"
 	"filevault/utils"
 	"fmt"
 	"os"
 	"time"
 
 	"context"
-
-	"github.com/mattn/go-sqlite3"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -25,14 +23,14 @@ var (
 )
 
 type AuthService struct {
-	conn *sql.DB
 	client *redis.Client
+	authRepo repositories.UserRepository
 }
 
-func NewAuthService(conn *sql.DB, client *redis.Client) *AuthService {
+func NewAuthService(client *redis.Client, repo repositories.UserRepository) *AuthService {
 	return &AuthService{
-		conn: conn,
 		client: client,
+		authRepo: repo,
 	}
 }
 
@@ -58,15 +56,10 @@ func (s *AuthService) Register(email, password string) error {
 	hashedPassword := hex.EncodeToString(hash)
 	userID := utils.GenerateRandomString(16)
 	// Store user in the database 
-	query := "INSERT INTO users (id, email, password) VALUES (?, ?, ?)"
-	_, err = s.conn.ExecContext(context.Background(), query, userID, email, hashedPassword)
+	err = s.authRepo.CreateUser(context.Background(), userID, email, hashedPassword)
 	if err != nil {
-		if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.Code == sqlite3.ErrConstraint {
-			return ErrUserAlreadyExists
-		}
-		return fmt.Errorf("failed to register user: %w", err)
+		return err
 	}
-
 	fmt.Println("User registered successfully. Try logging in with vault login")
 	return nil
 }
@@ -83,13 +76,9 @@ func (s *AuthService) Login(email, password string) error {
 
 		// Check if user exists in the database
 		var hashedPassword string
-		query := "SELECT password FROM users WHERE email = ?"
-		err := s.conn.QueryRowContext(context.Background(), query, email).Scan(&hashedPassword)
+		err := s.authRepo.GetUserPasswordByEmail(context.Background(), email, &hashedPassword)
 		if err != nil {
-			if err == sql.ErrNoRows {
-				return fmt.Errorf("user not found: %w", err)
-			}
-			return fmt.Errorf("failed to query user: %w", err)
+			return err
 		}
 		// Verify password
 		hash := pbkdf2.Key([]byte(password), []byte("salt"), 1000, 32, sha256.New)
