@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"filevault/cli"
 	"filevault/db"
+	"filevault/repositories"
 	"filevault/services"
 	"fmt"
 	"os"
@@ -31,8 +32,12 @@ func main() {
 		fmt.Printf("Error connecting to Redis: %v\n", err)
 		return
 	}
-	fileService := services.NewFileService(dbConn, redisClient)
-	authService := services.NewAuthService(dbConn, redisClient)
+	// Initialize repos
+	authRepo := repositories.NewUserRepository(dbConn)
+	fileRepo := repositories.NewFileRepository(dbConn)
+
+	fileService := services.NewFileService(redisClient, fileRepo)
+	authService := services.NewAuthService(redisClient, authRepo)
 	cm := cli.NewCommandRouter(fileService, authService)
 
 	for {

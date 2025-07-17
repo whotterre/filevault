@@ -1,19 +1,23 @@
 package services
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"errors"
+	"filevault/repositories"
 	"filevault/utils"
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
+// Constants
+const DEFAULT_FOLDER_NAME = "default"
 // Errors
 var (
 	ErrMissingPathname     = errors.New("Missing pathname")
@@ -30,8 +34,8 @@ var (
 )
 
 type FileService struct {
-	db *sql.DB
 	conn *redis.Client
+	repo repositories.FileRepository
 }
 
 type FileMetadata struct {
@@ -40,14 +44,86 @@ type FileMetadata struct {
 	Size       int64     `json:"size"`        // In bytes
 	Path       string    `json:"path"`        // ./uploads/notes.txt"
 	UploadedAt time.Time `json:"uploaded_at"` // Iykyk
+	FileType   string 	 `json:"file_type"`
+	ParentId   string    `json:"parent_id"`  
 
 }
 
-func NewFileService(db *sql.DB, conn *redis.Client) *FileService {
+func NewFileService(conn *redis.Client, repo repositories.FileRepository) *FileService {
 	return &FileService{
-		db:db,
 		conn: conn,
+		repo: repo,
 	}
+}
+func (s *FileService) determineFileType(filePath string) (string, error) {
+	// This classifies the file into one of three classes
+	// Generic file, folder, or image
+
+	// Check if it's an image
+	matched, err:= regexp.MatchString(`(?i)\.(jpg|tiff|gif|bmp|png)$`, filePath)
+	if matched {
+		return "image", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("couldn't apply regex on input because %w", err)
+	}
+	// Check if it's a directory
+	fileInfo, err := os.Stat(filePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("file does not exist: %w", err)
+	}
+	if fileInfo.IsDir() {
+		return "folder", nil  
+	}
+	
+	return "file", nil 		// Generic file case
+}
+
+// Gets the user ID from Redis using the session token
+func (s *FileService) getUserID(sessionToken string, conn *redis.Client) (string, error) {
+	ctx := context.Background()
+	email, err := conn.Get(ctx, sessionToken).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", fmt.Errorf("Session token does not exist")
+		}
+		return "", fmt.Errorf("Error getting user ID: %v", err)
+	}
+
+	// Query the database to get the user ID
+	var id string
+	err = s.repo.GetUserByEmail(ctx, email, &id)
+	if err != nil {
+		return "", fmt.Errorf("Error querying user ID: %v", err)
+	}
+	if id == "" {
+		return "", fmt.Errorf("User ID not found for email: %s", email)
+	}
+
+	return id, nil
+}
+
+func (s *FileService) checkIsAuthenticated(sessionToken, userID string, conn *redis.Client) (bool, error) {
+	ctx := context.Background()
+	// Check if the user has a session token
+	email, err := conn.Get(ctx, sessionToken).Result()
+	if err != nil {
+		return false, errors.New("User isn't authenticated as they don't have a session token")
+	}
+
+	// Get user record from the SQLite3 db
+	var id string
+	err = s.repo.GetUserByEmail(ctx, email, &id)
+	if err != nil {
+		return false, errors.New("Something went wrong in trying to get user by email for auth")
+	}
+
+	// User exists if a record is found
+	if id == "" {
+		return false, errors.New("User ID not found for email: " + email)
+	}
+	fmt.Println("User is authenticated with ID:", id)
+	return true, nil
 }
 
 // UploadFiles uploads files to the server.
@@ -87,7 +163,11 @@ func (s *FileService) UploadFile(pathname string) error {
 			return err
 		}
 	}
-
+	// Check the file type 
+	fileType, err := s.determineFileType(pathname)
+	if err != nil {
+		return err
+	}
 	// Enough shalaye, let's upload the file!
 	uploadedFile, err := os.Open(pathname)
 	if err != nil {
@@ -113,12 +193,12 @@ func (s *FileService) UploadFile(pathname string) error {
 		return fmt.Errorf("failed to get session token: %w", err)
 	}
 	// Get user ID by session token
-	userId, err := utils.GetUserID(sessionToken, s.conn, s.db)
+	userId, err := s.getUserID(sessionToken, s.conn)
 	if err != nil {
 		return fmt.Errorf("failed to get user ID: %w", err)
 	}
 
-	valid, err := utils.CheckIsAuthenticated(sessionToken, userId, s.conn, s.db)
+	valid, err := s.checkIsAuthenticated(sessionToken, userId, s.conn)
 	if err != nil {
 		return fmt.Errorf("Failed to validate user because %w", err)
 	}
@@ -133,14 +213,12 @@ func (s *FileService) UploadFile(pathname string) error {
 		Size:       osStat.Size(),
 		Path:       destinationPath,
 		UploadedAt: time.Now(),
+		FileType:   fileType,
 	}
 	// Add database record of metadata
-	fileRecord, err := s.db.Prepare("INSERT INTO files (id, file_name, user_id, size, file_path, uploaded_at) VALUES (?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare database statement: %w", err)
-	}
-	defer fileRecord.Close()
-	_, err = fileRecord.Exec(fileMetadata.FileId, fileMetadata.FileName, userId, fileMetadata.Size, fileMetadata.Path, fileMetadata.UploadedAt)
+	err = s.repo.CreateFile(fileMetadata.FileId, fileMetadata.FileName,
+		 userId, fileMetadata.Path, fileMetadata.FileType, fileMetadata.Size,
+		 fileMetadata.UploadedAt)
 	if err != nil {
 		return fmt.Errorf("failed to execute database statement: %w", err)
 	}
@@ -237,7 +315,6 @@ func (s *FileService) ListUploaded() error {
 }
 
 func (s *FileService) DeleteFile(fileId string) error {
-
 	// Ensure user is logged in 
 	if !utils.ValidateUser(s.conn) {
 		return errors.New("user is not logged in")
@@ -247,6 +324,13 @@ func (s *FileService) DeleteFile(fileId string) error {
 	if fileId == "" {
 		fmt.Print("Error fileID wasn't passed")
 		return errors.New("file ID is missing")
+	}
+
+	// Delete records of it from the database
+	err := s.repo.DeleteFile(fileId)
+	if err != nil {
+		fmt.Print("Failed to delete file")
+		return errors.New("file ID is missing ")
 	}
 	// Check if the metadata.json file exists
 	metadataPath := "./storage/metadata.json"

@@ -119,6 +119,33 @@ func (s *AuthService) Login(email, password string) error {
 		return nil
 }
 
+
+
+// Gets the user ID from Redis using the session token
+func (s *AuthService) getUserID(sessionToken string, conn *redis.Client) (string, error) {
+	ctx := context.Background()
+	email, err := conn.Get(ctx, sessionToken).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", fmt.Errorf("Session token does not exist")
+		}
+		return "", fmt.Errorf("Error getting user ID: %v", err)
+	}
+
+	// Query the database to get the user ID
+	var id string
+	err = s.authRepo.GetUserByEmail(ctx, email, &id)
+	if err != nil {
+		return "", fmt.Errorf("Error querying user ID: %v", err)
+	}
+	if id == "" {
+		return "", fmt.Errorf("User ID not found for email: %s", email)
+	}
+
+	return id, nil
+}
+
+
 func (s *AuthService) Logout() error {
 	sessionFilePath := "./vault_session"
 	sessionIDBytes, err := os.ReadFile(sessionFilePath)
