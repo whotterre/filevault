@@ -31,8 +31,11 @@ func GetSQLiteDBConn() (*sql.DB, error) {
             file_name TEXT,
             file_path TEXT,
             size TEXT,
+			type TEXT,
             uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
+			parent_id TEXT,
+			is_public INTEGER DEFAULT FALSE,
+			FOREIGN KEY (user_id) REFERENCES users(id)
         );
     `)
 	if err != nil {
