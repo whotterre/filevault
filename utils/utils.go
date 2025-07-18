@@ -2,8 +2,6 @@ package utils
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -84,58 +82,4 @@ func ValidateUser(conn *redis.Client) bool {
 	return true
 }
 
-// Gets the user ID from Redis using the session token
-func GetUserID(sessionToken string, conn *redis.Client, dbConn *sql.DB) (string, error) {
-	ctx := context.Background()
-	email, err := conn.Get(ctx, sessionToken).Result()
-	if err != nil {
-		if err == redis.Nil {
-			return "", fmt.Errorf("Session token does not exist")
-		}
-		return "", fmt.Errorf("Error getting user ID: %v", err)
-	}
 
-	// Query the database to get the user ID
-	var id string
-	query := "SELECT id FROM users WHERE email = ?"
-	err = dbConn.QueryRowContext(ctx, query, email).Scan(&id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("No user found with email: %s", email)
-		}
-		return "", fmt.Errorf("Error querying user ID: %v", err)
-	}
-	if id == "" {
-		return "", fmt.Errorf("User ID not found for email: %s", email)
-	}
-
-	return id, nil
-}
-
-func CheckIsAuthenticated(sessionToken, userID string, conn *redis.Client, dbConn *sql.DB) (bool, error) {
-	ctx := context.Background()
-	// Check if the user has a session token
-	//
-	email, err := conn.Get(ctx, sessionToken).Result()
-	if err != nil {
-		return false, errors.New("User isn't authenticated as they don't have a session token")
-	}
-
-	// Get user record from the SQLite3 db
-	query := "SELECT id FROM users WHERE email = ?"
-	var id string
-	err = dbConn.QueryRowContext(ctx, query, email).Scan(&id)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, errors.New("User doesn't exist")
-		}
-		return false, errors.New("Failed to execute query to check user is registered.")
-	}
-
-	// User exists if a record is found
-	if id == "" {
-		return false, errors.New("User ID not found for email: " + email)
-	}
-	fmt.Println("User is authenticated with ID:", id)
-	return true, nil
-}

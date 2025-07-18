@@ -12,6 +12,7 @@ import (
 func Welcome() {
 	println("Welcome to the FileVault CLI!")
 	println("Use 'help' to see available commands.")
+	println("Type 'exit' to close the CLI.")
 }
 
 // Display help message

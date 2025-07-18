@@ -23,14 +23,16 @@ var (
 )
 
 type AuthService struct {
-	client *redis.Client
 	authRepo repositories.UserRepository
+	sessionRepo repositories.SessionRepository
 }
 
-func NewAuthService(client *redis.Client, repo repositories.UserRepository) *AuthService {
+func NewAuthService(client *redis.Client,
+	 repo repositories.UserRepository,
+	 sessionRepo repositories.SessionRepository) *AuthService {
 	return &AuthService{
-		client: client,
-		authRepo: repo,
+		authRepo:  repo,
+		sessionRepo: sessionRepo,
 	}
 }
 
@@ -43,11 +45,11 @@ func (s *AuthService) Register(email, password string) error {
 	}
 
 	// Check if user already exists
-	val, err := s.client.Get(context.Background(), email).Result()
+	exists, err := s.sessionRepo.CheckSessionExists(context.Background(), email)
 	if err != nil && err != redis.Nil {
 		return err
 	}
-	if val != "" {
+	if exists {
 		return ErrUserAlreadyExists
 	}
 
@@ -88,11 +90,11 @@ func (s *AuthService) Login(email, password string) error {
 		}
 		// If password matches, create a session
 		// Check if session already exists
-		sessionExists, err := s.client.Exists(context.Background(), email).Result()
+		sessionExists, err := s.sessionRepo.CheckSessionExists(context.Background(), email)
 		if err != nil {
 			return fmt.Errorf("failed to check session existence: %w", err)
 		}
-		if sessionExists > 0 {
+		if sessionExists {
 			return fmt.Errorf("session already exists for user %s", email)
 		}
 
@@ -100,7 +102,8 @@ func (s *AuthService) Login(email, password string) error {
 		// Generate a session ID and store it in Redis
 		// Session expires in 15 minutes as required
 		sessionID := utils.GenerateRandomString(16)
-		err = s.client.Set(context.Background(), sessionID, email, 15 * time.Minute).Err()
+		exp := 15 * time.Minute
+		err = s.sessionRepo.CreateSession(context.Background(), email, sessionID, exp)
 		if err != nil {
 			return fmt.Errorf("failed to create session: %w", err)
 		}
@@ -156,11 +159,11 @@ func (s *AuthService) Logout() error {
 		return fmt.Errorf("failed to read session file %s: %w", sessionFilePath, err)
 	}
 	sessionID := string(sessionIDBytes)
-	delCount, err := s.client.Del(context.Background(), sessionID).Result()
+	deleted, err := s.sessionRepo.DeleteSession(context.Background(), sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to delete session from Redis: %w", err)
 	}
-	if delCount == 0 {
+	if !deleted {
 		// This means the session ID was not found in Redis, perhaps it expired or was already deleted.
 		fmt.Printf("Warning: Session ID '%s' not found in Redis, might have expired or already been logged out.\n", sessionID)
 	}

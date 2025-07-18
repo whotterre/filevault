@@ -35,9 +35,10 @@ func main() {
 	// Initialize repos
 	authRepo := repositories.NewUserRepository(dbConn)
 	fileRepo := repositories.NewFileRepository(dbConn)
-
+	sessionRepo := repositories.NewSessionRepository(redisClient)
+	// Initialize services
 	fileService := services.NewFileService(redisClient, fileRepo)
-	authService := services.NewAuthService(redisClient, authRepo)
+	authService := services.NewAuthService(redisClient, authRepo, sessionRepo)
 	cm := cli.NewCommandRouter(fileService, authService)
 
 	for {
@@ -47,7 +48,7 @@ func main() {
 		if scanner.Scan() {
 			input := scanner.Text()
 
-			// Parse the input into command and arguments
+			// Tokenize the input into command and arguments
 			parts := strings.Fields(input)
 			if len(parts) == 0 {
 				continue

@@ -25,9 +25,6 @@ func NewCommandRouter(fs *services.FileService, as *services.AuthService) *Comma
 	registerCmd := commands.NewRegisterCommand(as)
 	loginCmd := commands.NewLoginCommand(as)
 	logoutCmd := commands.NewLogoutCommand(as)
-	// Test the command directly
-	fmt.Printf("Upload command name: %s\n", uploadCmd.Name())
-	fmt.Printf("Upload command help: %s\n", uploadCmd.HelpContent())
 
 	router.RegisterCommand(uploadCmd)
 	router.RegisterCommand(listCmd)
@@ -41,7 +38,6 @@ func NewCommandRouter(fs *services.FileService, as *services.AuthService) *Comma
 }
 
 func (r *CommandRouter) RegisterCommand(cmd commands.ICommand) {
-	fmt.Printf("Registering command: %s\n", cmd.Name())
 	r.commands[cmd.Name()] = cmd
 }
 
