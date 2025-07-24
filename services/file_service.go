@@ -35,11 +35,15 @@ var (
 	ErrJSONUnmarshal       = errors.New("Failed to unmarshal data")
 	ErrFileUpload          = errors.New("Failed to upload file to filesystem")
 	ErrFileNotExistent     = errors.New("File doesn't exist")
+	ErrNoFolderNamePassed  = errors.New("Folder name wasn't passed while trying to create new folder")
+	ErrMissingFileId       = errors.New("File id wasn't passed")
+	ErrNotAuthenticated    = errors.New("User not authenticated")
 )
 
 type FileService struct {
-	conn *redis.Client
-	repo repositories.FileRepository
+	conn     *redis.Client
+	authRepo repositories.UserRepository
+	fileRepo repositories.FileRepository
 }
 
 type FileMetadata struct {
@@ -52,16 +56,16 @@ type FileMetadata struct {
 	ParentId   string    `json:"parent_id"`
 }
 
-func NewFileService(conn *redis.Client, repo repositories.FileRepository) *FileService {
+func NewFileService(conn *redis.Client, fileRepo repositories.FileRepository) *FileService {
 	return &FileService{
-		conn: conn,
-		repo: repo,
+		conn:     conn,
+		fileRepo: fileRepo,
 	}
 }
-func (s *FileService) determineFileType(filePath string) (string, error) {
-	// This classifies the file into one of three classes
-	// Generic file, folder, or image
 
+// This classifies the file into one of three classes
+// Generic file, folder, or image
+func (s *FileService) determineFileType(filePath string) (string, error) {
 	// Check if it's an image
 	matched, err := regexp.MatchString(`(?i)\.(jpg|tiff|gif|bmp|png)$`, filePath)
 	if matched {
@@ -95,7 +99,7 @@ func (s *FileService) getUserID(sessionToken string, conn *redis.Client) (string
 
 	// Query the database to get the user ID
 	var id string
-	err = s.repo.GetUserByEmail(ctx, email, &id)
+	err = s.fileRepo.GetUserByEmail(ctx, email, &id)
 	if err != nil {
 		return "", fmt.Errorf("Error querying user ID: %v", err)
 	}
@@ -106,7 +110,7 @@ func (s *FileService) getUserID(sessionToken string, conn *redis.Client) (string
 	return id, nil
 }
 
-func (s *FileService) checkIsAuthenticated(sessionToken, userID string, conn *redis.Client) (bool, error) {
+func (s *FileService) checkIsAuthenticated(sessionToken string, conn *redis.Client) (bool, error) {
 	ctx := context.Background()
 	// Check if the user has a session token
 	email, err := conn.Get(ctx, sessionToken).Result()
@@ -116,7 +120,7 @@ func (s *FileService) checkIsAuthenticated(sessionToken, userID string, conn *re
 
 	// Get user record from the SQLite3 db
 	var id string
-	err = s.repo.GetUserByEmail(ctx, email, &id)
+	err = s.fileRepo.GetUserByEmail(ctx, email, &id)
 	if err != nil {
 		return false, errors.New("Something went wrong in trying to get user by email for auth")
 	}
@@ -133,7 +137,7 @@ func (s *FileService) checkIsAuthenticated(sessionToken, userID string, conn *re
 // It checks if the "uploads" directory exists in the storage subdirectory.
 // Parameters:
 //   - pathname: The path of the file to be uploaded.
-func (s *FileService) UploadFile(pathname, foldername string) error {
+func (s *FileService) UploadFile(pathname, foldername, parentID string) error {
 	// Check if the "uploads" directory exists in the storage subdirectory
 	// If it doesn't exist, create it.
 	// Then extract the file metadata, generate UUID for file and then upload the file
@@ -176,7 +180,7 @@ func (s *FileService) UploadFile(pathname, foldername string) error {
 			foldername = DEFAULT_FOLDER_NAME
 		}
 		// Create the folder with the specified name
-		err = s.createFolder(foldername, pathname)
+		err = s.createEmptyFolder(foldername, parentID)
 		if err != nil {
 			return fmt.Errorf("failed to create folder: %w", err)
 		}
@@ -214,7 +218,7 @@ func (s *FileService) UploadFile(pathname, foldername string) error {
 		return fmt.Errorf("failed to get user ID: %w", err)
 	}
 
-	valid, err := s.checkIsAuthenticated(sessionToken, userId, s.conn)
+	valid, err := s.checkIsAuthenticated(sessionToken, s.conn)
 	if err != nil {
 		return fmt.Errorf("Failed to validate user because %w", err)
 	}
@@ -232,8 +236,8 @@ func (s *FileService) UploadFile(pathname, foldername string) error {
 		FileType:   fileType,
 	}
 	// Add database record of metadata
-	err = s.repo.CreateFile(fileMetadata.FileId, fileMetadata.FileName,
-		userId, fileMetadata.Path, fileMetadata.FileType, fileMetadata.Size,
+	err = s.fileRepo.CreateFile(fileMetadata.FileId, fileMetadata.FileName,
+		userId, fileMetadata.Path, fileMetadata.FileType, fileMetadata.Size, "",
 		fileMetadata.UploadedAt)
 	if err != nil {
 		return fmt.Errorf("failed to execute database statement: %w", err)
@@ -296,8 +300,7 @@ func (s *FileService) UploadFile(pathname, foldername string) error {
 	return nil
 }
 
-
-func (s *FileService) createFolder(foldername, sourcePath string) error {
+func (s *FileService) createFolderWithFiles(foldername, sourcePath string) error {
 	// Validate and sanitize foldername
 	validFolderName := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 	if !validFolderName.MatchString(foldername) {
@@ -383,8 +386,6 @@ func (s *FileService) createFolder(foldername, sourcePath string) error {
 	return nil
 }
 
-
-
 func (s *FileService) ListUploaded() error {
 	// Check if the metadata.json file exists
 	// Ensure user is logged in
@@ -446,7 +447,7 @@ func (s *FileService) DeleteFile(fileId string) error {
 	}
 
 	// Delete records of it from the database
-	err := s.repo.DeleteFile(fileId)
+	err := s.fileRepo.DeleteFile(fileId)
 	if err != nil {
 		fmt.Print("Failed to delete file")
 		return errors.New("file ID is missing ")
@@ -510,5 +511,145 @@ func (s *FileService) DeleteFile(fileId string) error {
 		}
 	}
 
+	return nil
+}
+
+// Creates an empty folder
+func (s *FileService) createEmptyFolder(folderName, parentId string) error {
+	// Create the folder in the storage/uploads dir
+	if folderName == "" {
+		return ErrNoFolderNamePassed
+	}
+
+	err := os.MkdirAll(folderName, os.ModePerm)
+	if err != nil {
+		return errors.New("Something went wrong in creating the new folder")
+	}
+
+	// Store user ID
+	sessionToken, err := utils.GetSessionTokenFromFile()
+	if err != nil {
+		return fmt.Errorf("failed to get session token: %w", err)
+	}
+	// Get user ID by session token
+	userId, err := s.getUserID(sessionToken, s.conn)
+	if err != nil {
+		return fmt.Errorf("failed to get user ID: %w", err)
+	}
+	// Make folder database entry
+	folderID := utils.GenerateRandomString(16)
+	err = s.fileRepo.CreateFile(folderID, folderName, userId, "", "folder", 0, "", time.Now())
+	if err != nil {
+		return fmt.Errorf("Failed to create database entry for new folder because: %w", err)
+	}
+	// If parent id is provided
+	// Create a folder inside the folder with provided parentId
+	if parentId != "" {
+		ctx := context.Background()
+		// Find parent folder path from DB
+		folderInfo, err := s.fileRepo.GetFolderById(ctx, parentId)
+		if err != nil {
+			return fmt.Errorf("failed to get parent folder path: %w", err)
+		}
+		if folderInfo.Path == "" {
+			return fmt.Errorf("parent folder with ID %s does not exist", parentId)
+		}
+
+		// Create the new folder inside the parent folder
+		newFolderPath := folderInfo.Path + "/" + folderName
+		err = os.MkdirAll(newFolderPath, os.ModePerm)
+		if err != nil {
+			return fmt.Errorf("failed to create folder inside parent: %w", err)
+		}
+
+		// Create new entry in the db for the nested folder
+		nestedFolderID := utils.GenerateRandomString(16)
+		err = s.fileRepo.CreateFile(nestedFolderID, folderName, userId, newFolderPath, "folder", 0, parentId, time.Now())
+		if err != nil {
+			return fmt.Errorf("Failed to create database entry for nested folder because: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *FileService) PublishFile(fileId string) error {
+	ctx := context.Background()
+	if fileId == "" {
+		return ErrMissingFileId
+	}
+
+	// Ensure user is authenticated
+	sessionToken, err := utils.GetSessionTokenFromFile()
+	if err != nil {
+		return fmt.Errorf("failed to get session token: %w", err)
+	}
+	isAuth, err := s.checkIsAuthenticated(sessionToken, s.conn)
+	if err != nil {
+		return fmt.Errorf("Something went wrong while checking whether user was authenticated: %w", err)
+	}
+
+	if !isAuth {
+		return ErrNotAuthenticated
+	}
+
+	// We need to check that the user id is the same as the one for the file in the db
+	userId, err := s.getUserID(sessionToken, s.conn)
+	if err != nil {
+		return fmt.Errorf("failed to get user ID: %w", err)
+	}
+	fileOwnerId, err := s.fileRepo.GetFileOwnerId(ctx, fileId)
+	if err != nil {
+		return fmt.Errorf("failed to get file owner ID: %w", err)
+	}
+	if userId != fileOwnerId {
+		return errors.New("user is not authorized to make file public")
+	}
+	err = s.fileRepo.PublishFile(ctx, fileId)
+	if err != nil {
+		return fmt.Errorf("failed to make file public: %w", err)
+	}
+
+	fmt.Printf("File with ID %s has successfully been made public\n", fileId)
+	return nil
+}
+
+func (s *FileService) UnPublishFile(fileId string) error {
+	ctx := context.Background()
+	if fileId == "" {
+		return ErrMissingFileId
+	}
+
+	// Ensure user is authenticated
+	sessionToken, err := utils.GetSessionTokenFromFile()
+	if err != nil {
+		return fmt.Errorf("failed to get session token: %w", err)
+	}
+	isAuth, err := s.checkIsAuthenticated(sessionToken, s.conn)
+	if err != nil {
+		return fmt.Errorf("Something went wrong while checking whether user was authenticated: %w", err)
+	}
+
+	if !isAuth {
+		return ErrNotAuthenticated
+	}
+
+	// We need to check that the user id is the same as the one for the file in the db
+	userId, err := s.getUserID(sessionToken, s.conn)
+	if err != nil {
+		return fmt.Errorf("failed to get user ID: %w", err)
+	}
+	fileOwnerId, err := s.fileRepo.GetFileOwnerId(ctx, fileId)
+	if err != nil {
+		return fmt.Errorf("failed to get file owner ID: %w", err)
+	}
+	if userId != fileOwnerId {
+		return errors.New("user is not authorized to unpublish this file")
+	}
+	err = s.fileRepo.PublishFile(ctx, fileId)
+	if err != nil {
+		return fmt.Errorf("failed to make file private: %w", err)
+	}
+
+	fmt.Printf("File with ID %s has successfully been made private\n", fileId)
 	return nil
 }
