@@ -16,22 +16,22 @@ import (
 )
 
 var (
-	ErrNoEmailProvided = errors.New("No email provided")
-	ErrNoPasswordProvided = errors.New("No password provided")
-	ErrUserAlreadyExists = errors.New("User already exists")
+	ErrNoEmailProvided     = errors.New("No email provided")
+	ErrNoPasswordProvided  = errors.New("No password provided")
+	ErrUserAlreadyExists   = errors.New("User already exists")
 	ErrSessionFileNotFound = errors.New("Session file not foundd")
 )
 
 type AuthService struct {
-	authRepo repositories.UserRepository
+	authRepo    repositories.UserRepository
 	sessionRepo repositories.SessionRepository
 }
 
 func NewAuthService(client *redis.Client,
-	 repo repositories.UserRepository,
-	 sessionRepo repositories.SessionRepository) *AuthService {
+	repo repositories.UserRepository,
+	sessionRepo repositories.SessionRepository) *AuthService {
 	return &AuthService{
-		authRepo:  repo,
+		authRepo:    repo,
 		sessionRepo: sessionRepo,
 	}
 }
@@ -57,7 +57,7 @@ func (s *AuthService) Register(email, password string) error {
 	hash := pbkdf2.Key([]byte(password), []byte("salt"), 1000, 32, sha256.New)
 	hashedPassword := hex.EncodeToString(hash)
 	userID := utils.GenerateRandomString(16)
-	// Store user in the database 
+	// Store user in the database
 	err = s.authRepo.CreateUser(context.Background(), userID, email, hashedPassword)
 	if err != nil {
 		return err
@@ -66,63 +66,68 @@ func (s *AuthService) Register(email, password string) error {
 	return nil
 }
 
-
 func (s *AuthService) Login(email, password string) error {
-		if email == "" {
+	if email == "" {
 		return ErrNoEmailProvided
-		} 
+	}
 
-		if password == "" {
-			return ErrNoPasswordProvided
-		}
+	if password == "" {
+		return ErrNoPasswordProvided
+	}
 
-		// Check if user exists in the database
-		var hashedPassword string
-		err := s.authRepo.GetUserPasswordByEmail(context.Background(), email, &hashedPassword)
-		if err != nil {
-			return err
-		}
-		// Verify password
-		hash := pbkdf2.Key([]byte(password), []byte("salt"), 1000, 32, sha256.New)
-		hashedInputPassword := hex.EncodeToString(hash)
-		if hashedInputPassword != hashedPassword {
-			return fmt.Errorf("invalid password")
-		}
-		// If password matches, create a session
-		// Check if session already exists
-		sessionExists, err := s.sessionRepo.CheckSessionExists(context.Background(), email)
-		if err != nil {
-			return fmt.Errorf("failed to check session existence: %w", err)
-		}
-		if sessionExists {
-			return fmt.Errorf("session already exists for user %s", email)
-		}
+	// Check if user exists in the database
+	userHash, err := s.authRepo.GetUserPasswordByEmail(context.Background(), email)
+	if err != nil {
+		return err
+	}
+	// Verify password
+	hash := pbkdf2.Key([]byte(password), []byte("salt"), 1000, 32, sha256.New)
+	hashedInputPassword := hex.EncodeToString(hash)
+	if hashedInputPassword != userHash {
+		return fmt.Errorf("invalid password")
+	}
+	// If password matches, create a session
+	// Check if session already exists
+	sessionExists, err := s.sessionRepo.CheckSessionExists(context.Background(), email)
+	if err != nil {
+		return fmt.Errorf("failed to check session existence: %w", err)
+	}
+	if sessionExists {
+		return fmt.Errorf("session already exists for user %s", email)
+	}
 
-		// If session does not exist, create a new session
-		// Generate a session ID and store it in Redis
-		// Session expires in 15 minutes as required
-		sessionID := utils.GenerateRandomString(16)
-		exp := 15 * time.Minute
-		err = s.sessionRepo.CreateSession(context.Background(), email, sessionID, exp)
-		if err != nil {
-			return fmt.Errorf("failed to create session: %w", err)
-		}
-		// Store this "state" that the token represents in a file
-		file, err := os.Create("./vault_session")
-		if err != nil {
-			return errors.New("Session file not created")
-		}
-		defer file.Close()
-		_, err = file.WriteString(sessionID)
-		if err != nil {
-			return errors.New("Something went wrong while writing the token to your session file")
-		}
-
-		fmt.Printf("Login successful. Your session ID is: %s\n", sessionID)
-		return nil
+	// If session does not exist, create a new session
+	// Generate a session ID and store it in Redis
+	// Session expires in 15 minutes as required
+	sessionID := utils.GenerateRandomString(16)
+	exp := 15 * time.Minute
+	err = s.sessionRepo.CreateSession(context.Background(), email, sessionID, exp)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+	// Store this "state" that the token represents in a file
+	file, err := os.Create("./vault_session")
+	if err != nil {
+		return errors.New("Session file not created")
+	}
+	defer file.Close()
+	_, err = file.WriteString(sessionID)
+	if err != nil {
+		return errors.New("Something went wrong while writing the token to your session file")
+	}
+	// Store the current logged in user
+	userFile, err := os.Create("./current_user")
+	if err != nil {
+		return errors.New("Current identity file not created")
+	}
+	defer userFile.Close()
+	_, err = userFile.WriteString(email)
+	if err != nil {
+		return errors.New("Something went wrong while writing current user's identity to your session file")
+	}
+	fmt.Printf("Login successful. Your session ID is: %s\n", sessionID)
+	return nil
 }
-
-
 
 // Gets the user ID from Redis using the session token
 func (s *AuthService) getUserID(sessionToken string, conn *redis.Client) (string, error) {
@@ -148,9 +153,9 @@ func (s *AuthService) getUserID(sessionToken string, conn *redis.Client) (string
 	return id, nil
 }
 
-
 func (s *AuthService) Logout() error {
 	sessionFilePath := "./vault_session"
+	currentUserFilePath := "./current_user"
 	sessionIDBytes, err := os.ReadFile(sessionFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -173,6 +178,16 @@ func (s *AuthService) Logout() error {
 		if os.IsNotExist(err) {
 			// File might have been manually deleted already, which is fine for logout.
 			fmt.Printf("Warning: Session file '%s' already removed locally.\n", sessionFilePath)
+		} else {
+			return fmt.Errorf("failed to delete local session file %s: %w", sessionFilePath, err)
+		}
+	}
+
+	err = os.Remove(currentUserFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File might have been manually deleted already, which is fine for logout.
+			fmt.Printf("Warning: Current user file '%s' already removed locally.\n", sessionFilePath)
 		} else {
 			return fmt.Errorf("failed to delete local session file %s: %w", sessionFilePath, err)
 		}

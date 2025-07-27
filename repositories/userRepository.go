@@ -15,7 +15,7 @@ var (
 
 type UserRepository interface {
 	CreateUser(ctx context.Context, userID, email, hashedPassword string) error 
-	GetUserPasswordByEmail(ctx context.Context,email string, hashedPwdDst *string) error 
+	GetUserPasswordByEmail(ctx context.Context,email string) (string, error)
 	GetUserByEmail (ctx context.Context, email string, idDest *string) error 
 }
 
@@ -39,16 +39,17 @@ func (r *userRepository) CreateUser(ctx context.Context, userID, email, hashedPa
 	return nil
 }
 
-func (r *userRepository) GetUserPasswordByEmail(ctx context.Context,email string, hashedPwdDst *string) error {
+func (r *userRepository) GetUserPasswordByEmail(ctx context.Context,email string) (string, error) {
+	var passwordHash string
 	query := "SELECT password FROM users WHERE email = ?"
-	err := r.db.QueryRowContext(ctx, query, email).Scan(&hashedPwdDst)
+	err := r.db.QueryRowContext(ctx, query, email).Scan(&passwordHash)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("user not found: %w", err)
+			return "", fmt.Errorf("user not found: %w", err)
 		}
-		return fmt.Errorf("failed to query user: %w", err)
+		return "", fmt.Errorf("failed to query user: %w", err)
 	}
-	return nil 
+	return passwordHash, nil
 }
 
 func (r *userRepository) GetUserByEmail (ctx context.Context, email string, idDest *string) error {
