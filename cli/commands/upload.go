@@ -19,15 +19,26 @@ func NewUploadCommand(fileService *services.FileService) ICommand {
 // Execute runs the upload command with the provided arguments.
 func (c *UploadCommand) Execute(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("no file path provided")
+		return fmt.Errorf("usage: upload <file_path> [folder_name]")
 	}
 	filePath := args[0]
-	fmt.Printf("Uploading file: %s\n...", filePath)
-	err := c.fileService.UploadFile(filePath)
+	var folderName string
+	if len(args) > 1 {
+		folderName = args[1]
+	}
+
+	fmt.Printf("Uploading file: %s", filePath)
+	if folderName != "" {
+		fmt.Printf(" to folder: %s", folderName)
+	}
+	fmt.Println("...")
+
+	err := c.fileService.UploadFileToFolder(filePath, folderName)
 	if err != nil {
 		return fmt.Errorf("failed to upload file: %w", err)
 	}
-	fmt.Printf("Uploaded file: %s\n...", filePath)
+
+	fmt.Printf("Uploaded file: %s\n", filePath)
 	return nil
 }
 
@@ -36,5 +47,5 @@ func (c *UploadCommand) Name() string {
 }
 
 func (c *UploadCommand) HelpContent() string {
-    return "Upload a file to the vault. Usage: upload <filepath>"
+	return "upload <file_path> [folder_name] - Upload a file to a folder"
 }

@@ -62,19 +62,19 @@ func GetSessionTokenFromFile() (string, error) {
 
 // CheckValidUser checks if the user is valid in Redis
 func ValidateUser(conn *redis.Client) bool {
-	tokenStr, err := GetSessionTokenFromFile()
+	currentUser, err := GetCurrentUser()
 	if err != nil {
 		fmt.Println("Error getting session token:", err)
 		return false
 	}
-	if tokenStr == "" {
+	if currentUser == "" {
 		fmt.Println("Session file is empty.")
 		return false
 	}
 
 	// Check if it exists in Redis
 	ctx := context.Background()
-	exists := conn.Exists(ctx, tokenStr).Val()
+	exists := conn.Exists(ctx, currentUser).Val()
 	if exists == 0 {
 		fmt.Println("User session has expired or doesn't exist. Please log in again")
 		return false
@@ -82,4 +82,20 @@ func ValidateUser(conn *redis.Client) bool {
 	return true
 }
 
+// Gets the current user
+func GetCurrentUser() (string, error) {
+	const CURRENT_USER_FILE = "./current_user"
 
+	if _, err := os.Stat(CURRENT_USER_FILE); os.IsNotExist(err) {
+		fmt.Println("Current user file does not exist.")
+		return "", err
+	}
+	// Read the file content
+	data, err := os.ReadFile(CURRENT_USER_FILE)
+	if err != nil {
+		fmt.Println("Error reading session file:", err)
+		return "", err
+	}
+	currentUser := string(data)
+	return currentUser, nil
+}

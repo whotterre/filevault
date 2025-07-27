@@ -112,26 +112,25 @@ func (s *FileService) getUserID() (string, error) {
 	return id, nil
 }
 
-func (s *FileService) checkIsAuthenticated(sessionToken string, conn *redis.Client) (bool, error) {
+func (s *FileService) checkIsAuthenticated(email string, conn *redis.Client) (bool, error) {
 	ctx := context.Background()
+	// Check session token exists first
+	sessionTokenFromFile, err := utils.GetSessionTokenFromFile()
+	if err != nil {
+		return false, err
+	}
 	// Check if the user has a session token
-	email, err := conn.Get(ctx, sessionToken).Result()
+	email, err = utils.GetCurrentUser()
+	if err != nil {
+		return false, errors.New("Failed to get current user")
+	}
+	sessionToken, err := conn.Get(ctx, email).Result()
 	if err != nil {
 		return false, errors.New("User isn't authenticated as they don't have a session token")
 	}
 
-	// Get user record from the SQLite3 db
-	id, err := s.fileRepo.GetUserByEmail(ctx, email)
-	if err != nil {
-		return false, errors.New("Something went wrong in trying to get user by email for auth")
-	}
-
-	// User exists if a record is found
-	if id == "" {
-		return false, errors.New("User ID not found for email: " + email)
-	}
-	fmt.Println("User is authenticated with ID:", id)
-	return true, nil
+	
+	return sessionToken == sessionTokenFromFile, nil
 }
 
 // UploadFiles uploads files to the server.
@@ -175,7 +174,6 @@ func (s *FileService) UploadFile(pathname, parentID string) error {
 	if err != nil {
 		return err
 	}
-
 
 	// Copy the file FIRST
 	uploadedFile, err := os.Open(pathname)
@@ -599,6 +597,7 @@ func (s *FileService) PublishFile(fileId string) error {
 		return ErrNotAuthenticated
 	}
 
+
 	// We need to check that the user id is the same as the one for the file in the db
 	userId, err := s.getUserID()
 	if err != nil {
@@ -620,7 +619,8 @@ func (s *FileService) PublishFile(fileId string) error {
 	return nil
 }
 
-func (s *FileService) UnPublishFile(fileId string) error {
+// Makes a file or folder private
+func (s *FileService) UnpublishFile(fileId string) error {
 	ctx := context.Background()
 	if fileId == "" {
 		return ErrMissingFileId

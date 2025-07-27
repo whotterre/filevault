@@ -6,9 +6,12 @@ import (
 	"filevault/db"
 	"filevault/repositories"
 	"filevault/services"
+	worker "filevault/workers"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/hibiken/asynq"
 )
 
 func init() {
@@ -32,12 +35,15 @@ func main() {
 		fmt.Printf("Error connecting to Redis: %v\n", err)
 		return
 	}
+	// Initialize async task distributor 
+	redisOpt := asynq.RedisClientOpt{Addr: "localhost:6379"}
+	taskDistributor := worker.NewRedisTaskDistributor(redisOpt)
 	// Initialize repos
 	authRepo := repositories.NewUserRepository(dbConn)
 	fileRepo := repositories.NewFileRepository(dbConn)
 	sessionRepo := repositories.NewSessionRepository(redisClient)
 	// Initialize services
-	fileService := services.NewFileService(redisClient, fileRepo)
+	fileService := services.NewFileService(redisClient, fileRepo, taskDistributor)
 	authService := services.NewAuthService(redisClient, authRepo, sessionRepo)
 	cm := cli.NewCommandRouter(fileService, authService)
 
