@@ -17,10 +17,13 @@ type FileRepository interface {
 		uploadedAt time.Time) error
 
 	DeleteFile(fileId string) error
-	GetUserByEmail(ctx context.Context, email string, idDest *string) error
+	GetUserByEmail(ctx context.Context, email string) (string, error)
 	GetUserPasswordByEmail(ctx context.Context, email string, hashedPwdDst *string) error
 	PublishFile(ctx context.Context, fileId string) error
 	UnPublishFile(ctx context.Context, fileId string) error
+	GetFolderById(ctx context.Context, folderId string) (FileMetadata, error)
+	GetFolderByName(ctx context.Context, folderName string) (FileMetadata, error)
+	GetFileOwnerId(ctx context.Context, fileId string) (string, error)
 }
 
 type fileRepository struct {
@@ -49,7 +52,7 @@ func (r *fileRepository) CreateFile(
 	}
 
 	fileRecord, err := r.db.Prepare(`INSERT INTO files (
-			id, file_name, user_id, size, file_path, file_type, parent_id, uploaded_at
+			id, file_name, user_id, size, file_path, type, parent_id, uploaded_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?);`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare database statement: %w", err)
@@ -78,16 +81,17 @@ func (r *fileRepository) DeleteFile(fileId string) error {
 	return nil
 }
 
-func (r *fileRepository) GetUserByEmail(ctx context.Context, email string, idDest *string) error {
+func (r *fileRepository) GetUserByEmail(ctx context.Context, email string) (string, error) {
+	var id string
 	query := "SELECT id FROM users WHERE email = ?"
-	err := r.db.QueryRowContext(ctx, query, email).Scan(&idDest)
+	err := r.db.QueryRowContext(ctx, query, email).Scan(&id)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("No user found with email: %s", email)
+			return "", fmt.Errorf("No user found with email: %s", email)
 		}
-		return fmt.Errorf("Error querying user ID: %v", err)
+		return "", fmt.Errorf("Error querying user ID: %v", err)
 	}
-	return nil
+	return id, nil
 }
 
 func (r *fileRepository) GetUserPasswordByEmail(ctx context.Context, email string, hashedPwdDst *string) error {
@@ -153,4 +157,82 @@ func (r *fileRepository) UnPublishFile(ctx context.Context, fileId string) error
 		return fmt.Errorf("Failed to update file as public: %w", err)
 	}
 	return nil
+}
+
+type FileMetadata struct {
+	FileId     string         `json:"file_id"` // UUID
+	FileName   string         `json:"file_name"`
+	Size       int64          `json:"size"` // In bytes
+	UserId     string         `json:"user_id"`
+	Path       string         `json:"path"`        // ./uploads/notes.txt"
+	UploadedAt time.Time      `json:"uploaded_at"` // Iykyk
+	FileType   string         `json:"type"`
+	ParentId   sql.NullString `json:"parent_id"`
+	IsPublic   int            `json:"is_public"`
+}
+
+func (r *fileRepository) GetFolderById(ctx context.Context, folderId string) (FileMetadata, error) {
+	var folderInfo FileMetadata
+	query := `SELECT id, file_name, 
+	user_id, size, file_path, type,
+	parent_id, uploaded_at, is_public
+	FROM files WHERE type = 'folder' AND id = ?`
+	err := r.db.QueryRowContext(ctx, query, folderId).Scan(
+		&folderInfo.FileId,
+		&folderInfo.FileName,
+		&folderInfo.Size,
+		&folderInfo.UserId,
+		&folderInfo.Path,
+		&folderInfo.FileType,
+		&folderInfo.ParentId,
+		&folderInfo.UploadedAt,
+		&folderInfo.IsPublic,
+	)
+	if err == sql.ErrNoRows {
+		return FileMetadata{}, fmt.Errorf("File doesn't exist: %w", err)
+	}
+	if err != nil {
+		return FileMetadata{}, fmt.Errorf("Failed to query folder info: %w", err)
+	}
+	return folderInfo, nil
+}
+
+// Gets info about a folder by it's folder name
+func (r *fileRepository) GetFolderByName(ctx context.Context, folderName string) (FileMetadata, error) {
+	var folderInfo FileMetadata
+	query := `SELECT id, file_name, 
+	user_id, size, file_path, type,
+	parent_id, uploaded_at, is_public
+	FROM files WHERE type = 'folder' AND file_name = ?`
+	err := r.db.QueryRowContext(ctx, query, folderName).Scan(
+		&folderInfo.FileId,
+		&folderInfo.FileName,
+		&folderInfo.UserId,
+		&folderInfo.Size,
+		&folderInfo.Path,
+		&folderInfo.FileType,
+		&folderInfo.ParentId,
+		&folderInfo.UploadedAt,
+		&folderInfo.IsPublic,
+	)
+	if err == sql.ErrNoRows {
+		return FileMetadata{}, fmt.Errorf("File doesn't exist: %w", err)
+	}
+	if err != nil {
+		return FileMetadata{}, fmt.Errorf("Failed to query folder info: %w", err)
+	}
+	return folderInfo, nil
+}
+
+func (r *fileRepository) GetFileOwnerId(ctx context.Context, fileId string) (string, error) {
+	var userId string
+	query := "SELECT user_id FROM files WHERE id = ?"
+	err := r.db.QueryRowContext(ctx, query, fileId).Scan(&userId)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("file not found: %w", err)
+		}
+		return "", fmt.Errorf("failed to query file owner: %w", err)
+	}
+	return userId, nil
 }

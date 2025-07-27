@@ -48,6 +48,10 @@ func IsValidCommand(command string) bool {
 		"exit",
 		"upload",
 		"list",
+		"mkdir",
+		"ls",
+		"publish",
+		"unpublish",
 		"read",
 		"delete",
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"filevault/repositories"
 	"filevault/utils"
+	worker "filevault/workers"
 	"fmt"
 	"io"
 	"os"
@@ -41,9 +42,10 @@ var (
 )
 
 type FileService struct {
-	conn     *redis.Client
-	authRepo repositories.UserRepository
-	fileRepo repositories.FileRepository
+	conn            *redis.Client
+	authRepo        repositories.UserRepository
+	fileRepo        repositories.FileRepository
+	taskDistributor worker.TaskDistributor
 }
 
 type FileMetadata struct {
@@ -56,10 +58,14 @@ type FileMetadata struct {
 	ParentId   string    `json:"parent_id"`
 }
 
-func NewFileService(conn *redis.Client, fileRepo repositories.FileRepository) *FileService {
+func NewFileService(conn *redis.Client,
+	fileRepo repositories.FileRepository,
+	taskDistributor worker.TaskDistributor,
+) *FileService {
 	return &FileService{
-		conn:     conn,
-		fileRepo: fileRepo,
+		conn:            conn,
+		fileRepo:        fileRepo,
+		taskDistributor: taskDistributor,
 	}
 }
 
@@ -87,24 +93,20 @@ func (s *FileService) determineFileType(filePath string) (string, error) {
 }
 
 // Gets the user ID from Redis using the session token
-func (s *FileService) getUserID(sessionToken string, conn *redis.Client) (string, error) {
+func (s *FileService) getUserID() (string, error) {
 	ctx := context.Background()
-	email, err := conn.Get(ctx, sessionToken).Result()
+	currentUser, err := utils.GetCurrentUser()
 	if err != nil {
-		if err == redis.Nil {
-			return "", fmt.Errorf("Session token does not exist")
-		}
-		return "", fmt.Errorf("Error getting user ID: %v", err)
+		return "", fmt.Errorf("Failed to get current user email %v", err)
 	}
 
 	// Query the database to get the user ID
-	var id string
-	err = s.fileRepo.GetUserByEmail(ctx, email, &id)
+	id, err := s.fileRepo.GetUserByEmail(ctx, currentUser)
 	if err != nil {
 		return "", fmt.Errorf("Error querying user ID: %v", err)
 	}
 	if id == "" {
-		return "", fmt.Errorf("User ID not found for email: %s", email)
+		return "", fmt.Errorf("User ID not found for email: %s", currentUser)
 	}
 
 	return id, nil
@@ -119,8 +121,7 @@ func (s *FileService) checkIsAuthenticated(sessionToken string, conn *redis.Clie
 	}
 
 	// Get user record from the SQLite3 db
-	var id string
-	err = s.fileRepo.GetUserByEmail(ctx, email, &id)
+	id, err := s.fileRepo.GetUserByEmail(ctx, email)
 	if err != nil {
 		return false, errors.New("Something went wrong in trying to get user by email for auth")
 	}
@@ -137,7 +138,7 @@ func (s *FileService) checkIsAuthenticated(sessionToken string, conn *redis.Clie
 // It checks if the "uploads" directory exists in the storage subdirectory.
 // Parameters:
 //   - pathname: The path of the file to be uploaded.
-func (s *FileService) UploadFile(pathname, foldername, parentID string) error {
+func (s *FileService) UploadFile(pathname, parentID string) error {
 	// Check if the "uploads" directory exists in the storage subdirectory
 	// If it doesn't exist, create it.
 	// Then extract the file metadata, generate UUID for file and then upload the file
@@ -174,46 +175,35 @@ func (s *FileService) UploadFile(pathname, foldername, parentID string) error {
 	if err != nil {
 		return err
 	}
-	// If it's a "folder", create a directory with the same name as it
-	if fileType == "folder" {
-		if foldername == "" {
-			foldername = DEFAULT_FOLDER_NAME
-		}
-		// Create the folder with the specified name
-		err = s.createEmptyFolder(foldername, parentID)
-		if err != nil {
-			return fmt.Errorf("failed to create folder: %w", err)
-		}
-		fmt.Printf("Folder '%s' created successfully.\n", foldername)
-		return nil
-	}
 
-	// Enough shalaye, let's upload the file!
+
+	// Copy the file FIRST
 	uploadedFile, err := os.Open(pathname)
 	if err != nil {
 		return err
 	}
 	defer uploadedFile.Close()
-	destinationPath := UPLOAD_FOLDER_PATH + "/" + osStat.Name()
+
+	destinationPath := UPLOAD_FOLDER_PATH + "/" + osStat.Name() // Fix path separator
 	destinationFile, err := os.Create(destinationPath)
 	if err != nil {
 		return err
 	}
+	defer destinationFile.Close()
 
 	// Copy the content of the old file to the new file
 	_, err = io.Copy(destinationFile, uploadedFile)
 	if err != nil {
 		return err
 	}
-	defer destinationFile.Close()
 
-	// Get user ID from the key value pair [sessionToken -> userId]
+	// Get user authentication details
 	sessionToken, err := utils.GetSessionTokenFromFile()
 	if err != nil {
 		return fmt.Errorf("failed to get session token: %w", err)
 	}
-	// Get user ID by session token
-	userId, err := s.getUserID(sessionToken, s.conn)
+
+	userId, err := s.getUserID()
 	if err != nil {
 		return fmt.Errorf("failed to get user ID: %w", err)
 	}
@@ -226,7 +216,7 @@ func (s *FileService) UploadFile(pathname, foldername, parentID string) error {
 		return fmt.Errorf("User isn't authenticated")
 	}
 
-	// Store the metadata of the file in metadata.json
+	// Store the metadata of the file
 	fileMetadata := FileMetadata{
 		FileId:     uuid.New().String(),
 		FileName:   osStat.Name(),
@@ -235,12 +225,26 @@ func (s *FileService) UploadFile(pathname, foldername, parentID string) error {
 		UploadedAt: time.Now(),
 		FileType:   fileType,
 	}
+
 	// Add database record of metadata
 	err = s.fileRepo.CreateFile(fileMetadata.FileId, fileMetadata.FileName,
 		userId, fileMetadata.Path, fileMetadata.FileType, fileMetadata.Size, "",
 		fileMetadata.UploadedAt)
 	if err != nil {
 		return fmt.Errorf("failed to execute database statement: %w", err)
+	}
+
+	// NOW queue thumbnail generation AFTER the file is copied and saved
+	if fileType == "image" {
+		// This is NOT async: worker.GenerateThumbnail runs synchronously.
+		// If you want async, use s.taskDistributor.DistributeThumbnailGeneration (uncomment below).
+		err := worker.GenerateThumbnail(destinationPath, fileMetadata.FileId)
+		if err != nil {
+			// Don't fail the upload if thumbnail queueing fails
+			fmt.Printf("Warning: Failed to queue thumbnail generation: %v\n", err)
+		} else {
+			fmt.Println("✓ Thumbnail generation queued")
+		}
 	}
 
 	// Open metadata.json
@@ -515,62 +519,65 @@ func (s *FileService) DeleteFile(fileId string) error {
 }
 
 // Creates an empty folder
-func (s *FileService) createEmptyFolder(folderName, parentId string) error {
-	// Create the folder in the storage/uploads dir
+func (s *FileService) CreateEmptyFolder(folderName, parentName string) error {
 	if folderName == "" {
 		return ErrNoFolderNamePassed
 	}
 
-	err := os.MkdirAll(folderName, os.ModePerm)
-	if err != nil {
-		return errors.New("Something went wrong in creating the new folder")
+	// Ensure the storage/uploads directory exists
+	if _, err := os.Stat(UPLOAD_FOLDER_PATH); os.IsNotExist(err) {
+		err = os.MkdirAll(UPLOAD_FOLDER_PATH, os.ModePerm)
+		if err != nil {
+			return fmt.Errorf("failed to create uploads directory: %w", err)
+		}
 	}
 
-	// Store user ID
-	sessionToken, err := utils.GetSessionTokenFromFile()
-	if err != nil {
-		return fmt.Errorf("failed to get session token: %w", err)
+	// Create the subdirectory with the given name inside uploads
+	folderPath := UPLOAD_FOLDER_PATH + "/" + folderName
+	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create folder: %w", err)
 	}
+
 	// Get user ID by session token
-	userId, err := s.getUserID(sessionToken, s.conn)
+	userId, err := s.getUserID()
 	if err != nil {
 		return fmt.Errorf("failed to get user ID: %w", err)
 	}
+
 	// Make folder database entry
-	folderID := utils.GenerateRandomString(16)
-	err = s.fileRepo.CreateFile(folderID, folderName, userId, "", "folder", 0, "", time.Now())
+	folderID := uuid.New().String()
+	err = s.fileRepo.CreateFile(folderID, folderName, userId, folderPath, "folder", 0, parentName, time.Now())
 	if err != nil {
-		return fmt.Errorf("Failed to create database entry for new folder because: %w", err)
+		return fmt.Errorf("failed to create database entry for new folder: %w", err)
 	}
-	// If parent id is provided
-	// Create a folder inside the folder with provided parentId
-	if parentId != "" {
+
+	// If parentId is provided, create a nested folder inside the parent folder
+	if parentName != "" {
 		ctx := context.Background()
-		// Find parent folder path from DB
-		folderInfo, err := s.fileRepo.GetFolderById(ctx, parentId)
+		parentInfo, err := s.fileRepo.GetFolderByName(ctx, parentName)
 		if err != nil {
-			return fmt.Errorf("failed to get parent folder path: %w", err)
+			return fmt.Errorf("failed to get parent folder info: %w", err)
 		}
-		if folderInfo.Path == "" {
-			return fmt.Errorf("parent folder with ID %s does not exist", parentId)
-		}
-
-		// Create the new folder inside the parent folder
-		newFolderPath := folderInfo.Path + "/" + folderName
-		err = os.MkdirAll(newFolderPath, os.ModePerm)
-		if err != nil {
-			return fmt.Errorf("failed to create folder inside parent: %w", err)
+		if parentInfo.Path == "" {
+			return fmt.Errorf("parent folder with name %s does not exist", parentName)
 		}
 
-		// Create new entry in the db for the nested folder
-		nestedFolderID := utils.GenerateRandomString(16)
-		err = s.fileRepo.CreateFile(nestedFolderID, folderName, userId, newFolderPath, "folder", 0, parentId, time.Now())
+		nestedFolderPath := parentInfo.Path + "/" + folderName
+		if err := os.MkdirAll(nestedFolderPath, os.ModePerm); err != nil {
+			return fmt.Errorf("failed to create nested folder: %w", err)
+		}
+
+		nestedFolderID := uuid.New().String()
+		err = s.fileRepo.CreateFile(nestedFolderID, folderName, userId, nestedFolderPath, "folder", 0, parentInfo.FileId, time.Now())
 		if err != nil {
-			return fmt.Errorf("Failed to create database entry for nested folder because: %w", err)
+			return fmt.Errorf("failed to create database entry for nested folder: %w", err)
 		}
 	}
+
 	return nil
 }
+
+//
 
 func (s *FileService) PublishFile(fileId string) error {
 	ctx := context.Background()
@@ -593,7 +600,7 @@ func (s *FileService) PublishFile(fileId string) error {
 	}
 
 	// We need to check that the user id is the same as the one for the file in the db
-	userId, err := s.getUserID(sessionToken, s.conn)
+	userId, err := s.getUserID()
 	if err != nil {
 		return fmt.Errorf("failed to get user ID: %w", err)
 	}
@@ -634,7 +641,7 @@ func (s *FileService) UnPublishFile(fileId string) error {
 	}
 
 	// We need to check that the user id is the same as the one for the file in the db
-	userId, err := s.getUserID(sessionToken, s.conn)
+	userId, err := s.getUserID()
 	if err != nil {
 		return fmt.Errorf("failed to get user ID: %w", err)
 	}
@@ -643,7 +650,7 @@ func (s *FileService) UnPublishFile(fileId string) error {
 		return fmt.Errorf("failed to get file owner ID: %w", err)
 	}
 	if userId != fileOwnerId {
-		return errors.New("user is not authorized to unpublish this file")
+		return errors.New("user is not authorized to make file private")
 	}
 	err = s.fileRepo.PublishFile(ctx, fileId)
 	if err != nil {
@@ -651,5 +658,96 @@ func (s *FileService) UnPublishFile(fileId string) error {
 	}
 
 	fmt.Printf("File with ID %s has successfully been made private\n", fileId)
+	return nil
+}
+
+func (s *FileService) UploadFileToFolder(filePath string, folderName string) error {
+	// Ensure user is logged in
+	if !utils.ValidateUser(s.conn) {
+		return errors.New("user is not logged in")
+	}
+
+	if filePath == "" {
+		return ErrMissingPathname
+	}
+
+	// Check if the file exists and is not a directory
+	osStat, err := os.Stat(filePath)
+	if err != nil || osStat.IsDir() {
+		return ErrInvalidFileFormat
+	}
+
+	// Ensure the folder exists inside UPLOAD_FOLDER_PATH
+	folderPath := UPLOAD_FOLDER_PATH + "/" + folderName
+	if _, err := os.Stat(folderPath); os.IsNotExist(err) {
+		err = os.MkdirAll(folderPath, os.ModePerm)
+		if err != nil {
+			return ErrCreatingUploadDir
+		}
+	}
+
+	// Copy the file to the folder
+	uploadedFile, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer uploadedFile.Close()
+
+	destinationPath := folderPath + "/" + osStat.Name()
+	destinationFile, err := os.Create(destinationPath)
+	if err != nil {
+		return err
+	}
+	defer destinationFile.Close()
+
+	_, err = io.Copy(destinationFile, uploadedFile)
+	if err != nil {
+		return err
+	}
+	userId, err := s.getUserID()
+	if err != nil {
+		return fmt.Errorf("failed to get user ID: %w", err)
+	}
+
+	// Get file type
+	fileType, err := s.determineFileType(filePath)
+	if err != nil {
+		return err
+	}
+
+	// Store metadata in DB
+	fileMetadata := FileMetadata{
+		FileId:     uuid.New().String(),
+		FileName:   osStat.Name(),
+		Size:       osStat.Size(),
+		Path:       destinationPath,
+		UploadedAt: time.Now(),
+		FileType:   fileType,
+		ParentId:   folderName,
+	}
+	err = s.fileRepo.CreateFile(fileMetadata.FileId, fileMetadata.FileName,
+		userId, fileMetadata.Path, fileMetadata.FileType, fileMetadata.Size, folderName,
+		fileMetadata.UploadedAt)
+	if err != nil {
+		return fmt.Errorf("failed to execute database statement: %w", err)
+	}
+
+	// Update metadata.json
+	metadataPath := "./storage/metadata.json"
+	fileContent, err := os.ReadFile(metadataPath)
+	var metadataList []FileMetadata
+	if err == nil && len(fileContent) > 0 {
+		_ = json.Unmarshal(fileContent, &metadataList)
+	}
+	metadataList = append(metadataList, fileMetadata)
+	updatedMetadata, err := json.Marshal(metadataList)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(metadataPath, updatedMetadata, 0644)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }

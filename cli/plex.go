@@ -18,10 +18,12 @@ func NewCommandRouter(fs *services.FileService, as *services.AuthService) *Comma
 		commands: make(map[string]commands.ICommand),
 	}
 	
-
+	/* File based commands */
 	uploadCmd := commands.NewUploadCommand(fs)
 	listCmd := commands.NewListCommand(fs)
 	deleteCmd := commands.NewDeleteCommand(fs)
+	mkdirCmd := commands.NewMkdirCommand(fs)
+	/* Auth commands */
 	registerCmd := commands.NewRegisterCommand(as)
 	loginCmd := commands.NewLoginCommand(as)
 	logoutCmd := commands.NewLogoutCommand(as)
@@ -32,6 +34,7 @@ func NewCommandRouter(fs *services.FileService, as *services.AuthService) *Comma
 	router.RegisterCommand(registerCmd)
 	router.RegisterCommand(loginCmd)
 	router.RegisterCommand(logoutCmd)
+	router.RegisterCommand(mkdirCmd)
 	router.RegisterCommand(&HelpCommand{router: router})
 	
 	return router
