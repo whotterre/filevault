@@ -33,7 +33,15 @@ func (c *UploadCommand) Execute(args []string) error {
 	}
 	fmt.Println("...")
 
-	err := c.fileService.UploadFileToFolder(filePath, folderName)
+	var err error
+	if folderName == "" {
+		// Upload to root directory
+		err = c.fileService.UploadFile(filePath, "")
+	} else {
+		// Upload to specific folder
+		err = c.fileService.UploadFileToFolder(filePath, folderName)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to upload file: %w", err)
 	}

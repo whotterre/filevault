@@ -17,7 +17,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Constants
 const (
 	DEFAULT_FOLDER_NAME = "default"
 	UPLOAD_FOLDER_PATH  = "./storage/uploads"
@@ -129,7 +128,6 @@ func (s *FileService) checkIsAuthenticated(email string, conn *redis.Client) (bo
 		return false, errors.New("User isn't authenticated as they don't have a session token")
 	}
 
-	
 	return sessionToken == sessionTokenFromFile, nil
 }
 
@@ -171,6 +169,7 @@ func (s *FileService) UploadFile(pathname, parentID string) error {
 	}
 	// Check the file type
 	fileType, err := s.determineFileType(pathname)
+	fmt.Println(fileType)
 	if err != nil {
 		return err
 	}
@@ -231,15 +230,14 @@ func (s *FileService) UploadFile(pathname, parentID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to execute database statement: %w", err)
 	}
-
 	// NOW queue thumbnail generation AFTER the file is copied and saved
 	if fileType == "image" {
-		// This is NOT async: worker.GenerateThumbnail runs synchronously.
-		// If you want async, use s.taskDistributor.DistributeThumbnailGeneration (uncomment below).
-		err := worker.GenerateThumbnail(destinationPath, fileMetadata.FileId)
+		// Use async thumbnail generation to avoid blocking uploads
+		ctx := context.Background()
+		err = s.taskDistributor.DistributeThumbnailGeneration(destinationPath, fileMetadata.FileId, ctx)
 		if err != nil {
-			// Don't fail the upload if thumbnail queueing fails
-			fmt.Printf("Warning: Failed to queue thumbnail generation: %v\n", err)
+			// Don't fail the upload if thumbnail queueing fails - just log the error
+			fmt.Printf("⚠ Warning: Failed to queue thumbnail generation: %v\n", err)
 		} else {
 			fmt.Println("✓ Thumbnail generation queued")
 		}
@@ -597,7 +595,6 @@ func (s *FileService) PublishFile(fileId string) error {
 		return ErrNotAuthenticated
 	}
 
-
 	// We need to check that the user id is the same as the one for the file in the db
 	userId, err := s.getUserID()
 	if err != nil {
@@ -730,6 +727,19 @@ func (s *FileService) UploadFileToFolder(filePath string, folderName string) err
 		fileMetadata.UploadedAt)
 	if err != nil {
 		return fmt.Errorf("failed to execute database statement: %w", err)
+	}
+
+	// Generate thumbnail for images
+	if fileType == "image" {
+		// Use async thumbnail generation to avoid blocking uploads
+		ctx := context.Background()
+		err = s.taskDistributor.DistributeThumbnailGeneration(destinationPath, fileMetadata.FileId, ctx)
+		if err != nil {
+			// Don't fail the upload if thumbnail queueing fails - just log the error
+			fmt.Printf("⚠ Warning: Failed to queue thumbnail generation: %v\n", err)
+		} else {
+			fmt.Println("✓ Thumbnail generation queued")
+		}
 	}
 
 	// Update metadata.json

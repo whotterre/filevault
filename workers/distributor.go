@@ -50,9 +50,10 @@ func (distributor *RedisTaskDistributor) DistributeThumbnailGeneration(
 	task := asynq.NewTask("thumbnail:generate", jsonPayload, opts...)
 	taskInfo, err := distributor.client.EnqueueContext(ctx, task)
 	if err != nil {
-		return fmt.Errorf("Failed to enqueue task %s because %w", taskInfo.ID, err)
+		return fmt.Errorf("failed to enqueue thumbnail generation task: %w", err)
 	}
 
+	fmt.Printf("✓ Thumbnail generation task queued with ID: %s\n", taskInfo.ID)
 	return nil
 
 }

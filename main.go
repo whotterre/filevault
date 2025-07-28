@@ -27,7 +27,7 @@ func main() {
 	dbConn, err := db.GetSQLiteDBConn()
 	if err != nil {
 		fmt.Printf("Error connecting to database: %v\n", err)
-		return 
+		return
 	}
 	// Redis backing store
 	redisClient, err := db.GetRedisClient()
@@ -35,9 +35,18 @@ func main() {
 		fmt.Printf("Error connecting to Redis: %v\n", err)
 		return
 	}
-	// Initialize async task distributor 
-	redisOpt := asynq.RedisClientOpt{Addr: "localhost:6379"}
+	// Initialize async task distributor
+	redisOpt := asynq.RedisClientOpt{Addr: "172.17.0.3:6379"}
 	taskDistributor := worker.NewRedisTaskDistributor(redisOpt)
+
+	// Initialize and start task processor (this processes the queued tasks)
+	taskProcessor := worker.NewRedisTaskProcessor(redisOpt, dbConn)
+	go func() {
+		fmt.Println("Starting task processor...")
+		if err := taskProcessor.Start(); err != nil {
+			fmt.Printf("Failed to start task processor: %v\n", err)
+		}
+	}()
 	// Initialize repos
 	authRepo := repositories.NewUserRepository(dbConn)
 	fileRepo := repositories.NewFileRepository(dbConn)

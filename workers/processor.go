@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/hibiken/asynq"
 )
@@ -22,15 +23,11 @@ type RedisTaskProcessor struct {
 	db     *sql.DB
 }
 
-
 func NewRedisTaskProcessor(redisOpt asynq.RedisClientOpt, db *sql.DB) TaskProcessor {
 	server := asynq.NewServer(redisOpt, asynq.Config{
 		Concurrency: 10,
-		Queues: map[string]int{
-			"critical": 6,
-			"default":  3,
-			"low":      1,
-		},
+		// Add timeout for task processing
+		ShutdownTimeout: 30 * time.Second,
 	})
 
 	return &RedisTaskProcessor{
@@ -38,7 +35,6 @@ func NewRedisTaskProcessor(redisOpt asynq.RedisClientOpt, db *sql.DB) TaskProces
 		db:     db,
 	}
 }
-
 
 func (processor *RedisTaskProcessor) Start() error {
 	mux := asynq.NewServeMux()
@@ -55,12 +51,26 @@ func (processor *RedisTaskProcessor) ProcessThumbnailGenerationTask(ctx context.
 
 	log.Printf("Processing thumbnail generation for file: %s (ID: %s)", payload.ImagePath, payload.FileId)
 
-	// Generate thumbnail
-	err := GenerateThumbnail(payload.ImagePath, payload.FileId)
-	if err != nil {
-		return fmt.Errorf("failed to generate thumbnail: %w", err)
-	}
+	// Create a channel to handle the result
+	done := make(chan error, 1)
 
-	log.Printf("Successfully generated thumbnail for file: %s", payload.ImagePath)
-	return nil
+	// Run thumbnail generation in a goroutine to respect context cancellation
+	go func() {
+		err := GenerateThumbnail(payload.ImagePath, payload.FileId)
+		done <- err
+	}()
+
+	// Wait for either completion or context cancellation
+	select {
+	case err := <-done:
+		if err != nil {
+			log.Printf("Failed to generate thumbnail for file %s: %v", payload.ImagePath, err)
+			return fmt.Errorf("failed to generate thumbnail: %w", err)
+		}
+		log.Printf("Successfully generated thumbnail for file: %s", payload.ImagePath)
+		return nil
+	case <-ctx.Done():
+		log.Printf("Thumbnail generation cancelled for file: %s", payload.ImagePath)
+		return fmt.Errorf("thumbnail generation cancelled: %w", ctx.Err())
+	}
 }
