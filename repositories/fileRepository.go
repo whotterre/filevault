@@ -24,6 +24,8 @@ type FileRepository interface {
 	GetFolderById(ctx context.Context, folderId string) (FileMetadata, error)
 	GetFolderByName(ctx context.Context, folderName string) (FileMetadata, error)
 	GetFileOwnerId(ctx context.Context, fileId string) (string, error)
+	GetFilesInFolderByParentId(ctx context.Context, folderId string) ([]FileMetadata, error)
+	GetFilesFromRoot(ctx context.Context) ([]FileMetadata, error)
 }
 
 type fileRepository struct {
@@ -235,4 +237,60 @@ func (r *fileRepository) GetFileOwnerId(ctx context.Context, fileId string) (str
 		return "", fmt.Errorf("failed to query file owner: %w", err)
 	}
 	return userId, nil
+}
+
+func (r *fileRepository) GetFilesInFolderByParentId(ctx context.Context, folderId string) ([]FileMetadata, error) {
+	var files []FileMetadata
+	query := "SELECT file_name, user_id, type, is_public FROM files WHERE parent_id = ?"
+	rows, err := r.db.QueryContext(ctx, query, folderId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files in folder: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var file FileMetadata
+		err := rows.Scan(
+			&file.FileName,
+			&file.UserId,
+			&file.FileType,
+			&file.IsPublic,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan file metadata: %w", err)
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+	return files, nil
+}
+
+func (r *fileRepository) GetFilesFromRoot(ctx context.Context) ([]FileMetadata, error) {
+	var files []FileMetadata
+	query := "SELECT file_name, user_id, type, is_public FROM files WHERE parent_id IS NULL"
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files in folder: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var file FileMetadata
+		err := rows.Scan(
+			&file.FileName,
+			&file.UserId,
+			&file.FileType,
+			&file.IsPublic,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan file metadata: %w", err)
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+	return files, nil
 }

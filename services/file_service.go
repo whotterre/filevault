@@ -761,3 +761,99 @@ func (s *FileService) UploadFileToFolder(filePath string, folderName string) err
 
 	return nil
 }
+
+func (s *FileService) ListFilesInFolder(folderId string) error {
+	ctx := context.Background()
+
+	sessionToken, err := utils.GetSessionTokenFromFile()
+	if err != nil {
+		return fmt.Errorf("failed to get session token: %w", err)
+	}
+	isAuth, err := s.checkIsAuthenticated(sessionToken, s.conn)
+	if err != nil {
+		return fmt.Errorf("failed to check authentication: %w", err)
+	}
+	if !isAuth {
+		return ErrNotAuthenticated
+	}
+
+	// TODO: Implement logic to list files in the folder using folderId
+	// If folderId == "", list files in storage/uploads
+	// Counterintuitive to the visibility feature though
+	if folderId == "" {
+		s.listRoot()
+	}
+
+	// If folderId is passed, call the repo method with it
+	files, err := s.fileRepo.GetFilesInFolderByParentId(ctx, folderId)
+	if err != nil {
+		return err
+	}
+	// Loop and output all entries
+	for _, file := range files {
+		fmt.Printf("[%s] %s\n", file.FileType, file.FileName)
+	}
+
+	return nil
+}
+
+func (s *FileService) listRoot() error {
+	ctx := context.Background()
+
+	// Check authentication
+	sessionToken, err := utils.GetSessionTokenFromFile()
+	if err != nil {
+		return fmt.Errorf("failed to get session token: %w", err)
+	}
+	isAuth, err := s.checkIsAuthenticated(sessionToken, s.conn)
+	if err != nil {
+		return fmt.Errorf("failed to check authentication: %w", err)
+	}
+	if !isAuth {
+		return ErrNotAuthenticated
+	}
+
+	// Get current user ID
+	userId, err := s.getUserID()
+	if err != nil {
+		return fmt.Errorf("failed to get user ID: %w", err)
+	}
+
+	// Get root level files (files with empty or NULL parent_id) using GetFilesInFolderById with empty string
+	// This should return files where parent_id is empty/NULL
+	files, err := s.fileRepo.GetFilesFromRoot(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get root files: %w", err)
+	}
+
+	// Filter files by current user (since the repo method doesn't filter by user)
+	var userFiles []FileMetadata
+	for _, file := range files {
+		if file.UserId == userId {
+			userFile := FileMetadata{
+				FileId:     file.FileId,
+				FileName:   file.FileName,
+				Size:       file.Size,
+				Path:       file.Path,
+				UploadedAt: file.UploadedAt,
+				FileType:   file.FileType,
+			}
+			userFiles = append(userFiles, userFile)
+		}
+	}
+
+	if len(userFiles) == 0 {
+		fmt.Println("No files found in the root uploads directory")
+		return nil
+	}
+
+	fmt.Println("Root Files in storage/uploads:")
+	fmt.Println("-------------------------------")
+
+	// Loop and output all root level files
+	for _, file := range userFiles {
+		fmt.Printf("[%s] %s\n", file.FileType, file.FileName)
+	}
+
+	return nil
+}

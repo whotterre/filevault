@@ -36,6 +36,7 @@ func main() {
 		return
 	}
 	// Initialize async task distributor
+	// TODO: Load credentials like this from .env
 	redisOpt := asynq.RedisClientOpt{Addr: "172.17.0.3:6379"}
 	taskDistributor := worker.NewRedisTaskDistributor(redisOpt)
 

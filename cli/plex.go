@@ -23,6 +23,7 @@ func NewCommandRouter(fs *services.FileService, as *services.AuthService) *Comma
 	listCmd := commands.NewListCommand(fs)
 	deleteCmd := commands.NewDeleteCommand(fs)
 	mkdirCmd := commands.NewMkdirCommand(fs)
+	lsCmd := commands.NewLsCommand(fs)
 	/* Auth commands */
 	registerCmd := commands.NewRegisterCommand(as)
 	loginCmd := commands.NewLoginCommand(as)
@@ -35,6 +36,7 @@ func NewCommandRouter(fs *services.FileService, as *services.AuthService) *Comma
 	router.RegisterCommand(loginCmd)
 	router.RegisterCommand(logoutCmd)
 	router.RegisterCommand(mkdirCmd)
+	router.RegisterCommand(lsCmd)
 	router.RegisterCommand(&HelpCommand{router: router})
 	
 	return router

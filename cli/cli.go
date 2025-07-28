@@ -22,7 +22,11 @@ func Help() {
 	println("  exit    - Exit the application")
 	println("  read    - Displays metadata for a specific file")
 	println("  vault   - Manage vaults")
+	println("  ls [parent_id] - Lists contents of a folder")
+	println("  mkdir <folder_name> [parent_id] - Creates an empty folder")
 	println("  upload <filepath> - Manage files in vaults")
+	println("  publish <fileId>  - Makes a file or folder public")
+	println("  unpublish <fileId>  - Makes a file or folder private")
 }
 
 // Display exit message
