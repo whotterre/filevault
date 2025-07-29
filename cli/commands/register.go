@@ -1,8 +1,8 @@
 package commands
 
 import (
+	"core/services"
 	"errors"
-	"filevault/services"
 )
 
 var (
@@ -41,4 +41,3 @@ func (c *RegisterCommand) Name() string {
 func (c *RegisterCommand) HelpContent() string {
 	return "register <email> <password> - Register a new user with email and password"
 }
-

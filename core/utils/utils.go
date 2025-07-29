@@ -2,9 +2,12 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 
 	"github.com/redis/go-redis/v9"
@@ -98,4 +101,20 @@ func GetCurrentUser() (string, error) {
 	}
 	currentUser := string(data)
 	return currentUser, nil
+}
+
+// Write JSON response equiv to Gin's c.JSON()
+func WriteJSONResponse(w http.ResponseWriter, msg string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	response := fmt.Sprintf(`{"message": "%s"}`, msg)
+	w.Write([]byte(response))
+}
+
+func ToJSON(data map[string]any) ([]byte, error) {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return []byte(""), errors.New("Failed to serialize data as JSON")
+	}
+	return jsonData, nil
 }

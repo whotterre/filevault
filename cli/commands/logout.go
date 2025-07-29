@@ -1,8 +1,8 @@
 package commands
 
 import (
+	"core/services"
 	"errors"
-	"filevault/services"
 )
 
 var (
@@ -19,24 +19,23 @@ func NewLogoutCommand(authService *services.AuthService) ICommand {
 	}
 }
 
-func (c *LogoutCommand) Execute(args []string) error{
+func (c *LogoutCommand) Execute(args []string) error {
 	if len(args) > 0 {
-		
+
 		return ErrInvalidArgs
 	}
-
 
 	err := c.authService.Logout()
 	if err != nil {
 		return err
 	}
-	return nil 
+	return nil
 }
 
-func (c *LogoutCommand) Name () string {
+func (c *LogoutCommand) Name() string {
 	return "logout"
 }
 
-func (c *LogoutCommand) HelpContent () string {
+func (c *LogoutCommand) HelpContent() string {
 	return `Logs out a user`
 }

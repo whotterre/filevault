@@ -1,6 +1,6 @@
 package commands
 
-import "filevault/services"
+import "core/services"
 
 type LoginCommand struct {
 	services *services.AuthService

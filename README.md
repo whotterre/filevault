@@ -48,7 +48,7 @@ Then,
 ## 📂 Project Structure
 
 ```
-filevault/
+core/
 ├── cli/
 │   ├── commands/             # Individual command implementations
 │   └── plex.go               # Command routing and execution

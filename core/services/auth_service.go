@@ -2,15 +2,17 @@ package services
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"filevault/repositories"
-	"filevault/utils"
+	"core/repositories"
+	"core/utils"
 	"fmt"
 	"os"
 	"time"
 
 	"context"
+
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -127,6 +129,51 @@ func (s *AuthService) Login(email, password string) error {
 	}
 	fmt.Printf("Login successful. Your session ID is: %s\n", sessionID)
 	return nil
+}
+
+// Logs in a user with basic auth
+func (s *AuthService) BasicAuthLogin(email, password string) (string, error){
+	if email == "" {
+		return "", ErrNoEmailProvided
+	}
+
+	if password == "" {
+		return "", ErrNoPasswordProvided
+	}
+
+	// Check if user exists in the database
+	userHash, err := s.authRepo.GetUserPasswordByEmail(context.Background(), email)
+	if err != nil {
+		return "", err
+	}
+	// Verify password
+	hash := pbkdf2.Key([]byte(password), []byte("salt"), 1000, 32, sha256.New)
+	hashedInputPassword := hex.EncodeToString(hash)
+	if hashedInputPassword != userHash {
+		return "", fmt.Errorf("invalid password")
+	}
+	// If password matches, create a session
+	// Check if session already exists
+	sessionExists, err := s.sessionRepo.CheckSessionExists(context.Background(), email)
+	if err != nil {
+		return "", fmt.Errorf("failed to check session existence: %w", err)
+	}
+	if sessionExists {
+		return "", fmt.Errorf("session already exists for user %s", email)
+	}
+
+	// If session does not exist, create a new session
+	// Generate a session ID via base64 auth and store it in Redis
+	// Session expires in 15 minutes as required
+	payload := email + ":" + password
+	sessionID := base64.StdEncoding.EncodeToString([]byte(payload))
+	exp := 15 * time.Minute
+	err = s.sessionRepo.CreateSession(context.Background(), email, sessionID, exp)
+	if err != nil {
+		return "", fmt.Errorf("failed to create session: %w", err)
+	}
+
+	return sessionID, nil
 }
 
 // Gets the user ID from Redis using the session token

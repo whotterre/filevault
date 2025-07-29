@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"filevault/services"
+	"core/services"
 	"fmt"
 )
 

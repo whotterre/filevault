@@ -26,6 +26,8 @@ type FileRepository interface {
 	GetFileOwnerId(ctx context.Context, fileId string) (string, error)
 	GetFilesInFolderByParentId(ctx context.Context, folderId string) ([]FileMetadata, error)
 	GetFilesFromRoot(ctx context.Context) ([]FileMetadata, error)
+	GetUsersCount(ctx context.Context) (int, error)
+	GetFilesCount(ctx context.Context) (int, error)
 }
 
 type fileRepository struct {
@@ -293,4 +295,24 @@ func (r *fileRepository) GetFilesFromRoot(ctx context.Context) ([]FileMetadata, 
 		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
 	return files, nil
+}
+
+func (r *fileRepository) GetFilesCount(ctx context.Context) (int, error) {
+	var fileCount int
+	query := `SELECT COUNT(*) FROM files`
+	err := r.db.QueryRowContext(ctx, query).Scan(&fileCount)
+	if err != nil {
+		return 0, err
+	}
+	return fileCount, nil
+}
+
+func (r *fileRepository) GetUsersCount(ctx context.Context) (int, error) {
+	var userCount int
+	query := `SELECT COUNT(*) FROM users`
+	err := r.db.QueryRowContext(ctx, query).Scan(&userCount)
+	if err != nil {
+		return 0, err
+	}
+	return userCount, nil
 }

@@ -1,8 +1,8 @@
-package cli
+package main
 
 import (
-	"filevault/cli/commands"
-	"filevault/services"
+	"cli/commands"
+	"core/services"
 	"fmt"
 	"strings"
 )
@@ -17,7 +17,7 @@ func NewCommandRouter(fs *services.FileService, as *services.AuthService) *Comma
 	router := &CommandRouter{
 		commands: make(map[string]commands.ICommand),
 	}
-	
+
 	/* File based commands */
 	uploadCmd := commands.NewUploadCommand(fs)
 	listCmd := commands.NewListCommand(fs)
@@ -38,7 +38,7 @@ func NewCommandRouter(fs *services.FileService, as *services.AuthService) *Comma
 	router.RegisterCommand(mkdirCmd)
 	router.RegisterCommand(lsCmd)
 	router.RegisterCommand(&HelpCommand{router: router})
-	
+
 	return router
 }
 
