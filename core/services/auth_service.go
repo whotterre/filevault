@@ -1,14 +1,17 @@
 package services
 
 import (
+	"core/repositories"
+	"core/utils"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"core/repositories"
-	"core/utils"
 	"fmt"
+	"log"
 	"os"
+	"strings"
 	"time"
 
 	"context"
@@ -46,13 +49,18 @@ func (s *AuthService) Register(email, password string) error {
 		return ErrNoPasswordProvided
 	}
 
-	// Check if user already exists
-	exists, err := s.sessionRepo.CheckSessionExists(context.Background(), email)
-	if err != nil && err != redis.Nil {
-		return err
-	}
-	if exists {
+	// Check if user already exists in the database
+	_, err := s.authRepo.GetUserPasswordByEmail(context.Background(), email)
+	if err == nil {
+		// User exists (no error means we found the user)
 		return ErrUserAlreadyExists
+	}
+	// If we get an error other than "user not found", that's a real error
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		// Check if the error message contains "user not found" (custom error from repo)
+		if !strings.Contains(err.Error(), "user not found") {
+			return fmt.Errorf("error checking user existence: %w", err)
+		}
 	}
 
 	// Hash password (with PBKDF2)
@@ -85,6 +93,10 @@ func (s *AuthService) Login(email, password string) error {
 	// Verify password
 	hash := pbkdf2.Key([]byte(password), []byte("salt"), 1000, 32, sha256.New)
 	hashedInputPassword := hex.EncodeToString(hash)
+	log.Println(hashedInputPassword)
+	log.Println(hash)
+	log.Println(hashedInputPassword == userHash)
+	log.Print(hashedInputPassword == userHash)
 	if hashedInputPassword != userHash {
 		return fmt.Errorf("invalid password")
 	}
@@ -132,7 +144,7 @@ func (s *AuthService) Login(email, password string) error {
 }
 
 // Logs in a user with basic auth
-func (s *AuthService) BasicAuthLogin(email, password string) (string, error){
+func (s *AuthService) BasicAuthLogin(email, password string) (string, error) {
 	if email == "" {
 		return "", ErrNoEmailProvided
 	}
@@ -144,25 +156,33 @@ func (s *AuthService) BasicAuthLogin(email, password string) (string, error){
 	// Check if user exists in the database
 	userHash, err := s.authRepo.GetUserPasswordByEmail(context.Background(), email)
 	if err != nil {
-		return "", err
+		log.Printf("Error getting user password for email %s: %v", email, err)
+		return "", fmt.Errorf("user not found or database error: %w", err)
 	}
+
 	// Verify password
 	hash := pbkdf2.Key([]byte(password), []byte("salt"), 1000, 32, sha256.New)
 	hashedInputPassword := hex.EncodeToString(hash)
+	log.Printf("Password hash comparison - DB: %s, Input: %s", userHash, hashedInputPassword)
+
 	if hashedInputPassword != userHash {
-		return "", fmt.Errorf("invalid password")
-	}
-	// If password matches, create a session
-	// Check if session already exists
-	sessionExists, err := s.sessionRepo.CheckSessionExists(context.Background(), email)
-	if err != nil {
-		return "", fmt.Errorf("failed to check session existence: %w", err)
-	}
-	if sessionExists {
-		return "", fmt.Errorf("session already exists for user %s", email)
+		log.Printf("Password mismatch for user %s", email)
+		return "", fmt.Errorf("invalid credentials")
 	}
 
-	// If session does not exist, create a new session
+	// If password matches, check existing session and potentially reuse or create new
+	sessionExists, err := s.sessionRepo.CheckSessionExists(context.Background(), email)
+	if err != nil {
+		log.Printf("Error checking session existence: %v", err)
+		// Don't fail login just because we can't check session - continue to create new session
+	}
+
+	if sessionExists {
+		log.Printf("Session already exists for user %s, will create new session anyway", email)
+		// For API login, we'll allow creating a new session even if one exists
+		// This is different from CLI login which prevents multiple sessions
+	}
+
 	// Generate a session ID via base64 auth and store it in Redis
 	// Session expires in 15 minutes as required
 	payload := email + ":" + password
@@ -170,9 +190,11 @@ func (s *AuthService) BasicAuthLogin(email, password string) (string, error){
 	exp := 15 * time.Minute
 	err = s.sessionRepo.CreateSession(context.Background(), email, sessionID, exp)
 	if err != nil {
+		log.Printf("Error creating session: %v", err)
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
+	log.Printf("Login successful for user %s", email)
 	return sessionID, nil
 }
 

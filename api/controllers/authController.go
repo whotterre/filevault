@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -54,6 +53,7 @@ type RegisterUserRequest struct {
 func (ac *AuthController) Register(c *fiber.Ctx) error {
 	// Get the request body
 	var req RegisterUserRequest
+	log.Print(req)
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Failed to parse body for register request",
@@ -71,10 +71,10 @@ func (ac *AuthController) Register(c *fiber.Ctx) error {
 		})
 	}
 
-	userId := uuid.New().String()
-	err := ac.authRepo.CreateUser(c.Context(), userId, req.Email, req.Password)
+	// Use the auth service to register the user (this will properly hash the password)
+	err := ac.authService.Register(req.Email, req.Password)
 	if err != nil {
-		log.Printf("Failed to create user: %v", err)
+		log.Printf("Failed to register user: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create user",
 		})
@@ -99,6 +99,7 @@ func (ac *AuthController) Login(c *fiber.Ctx) error {
 			"error": "Failed to parse body for login request",
 		})
 	}
+	log.Print(req)
 	// Validate fields
 	if req.Email == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
