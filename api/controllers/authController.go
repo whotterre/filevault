@@ -127,6 +127,12 @@ func (ac *AuthController) Login(c *fiber.Ctx) error {
 			"error": "Failed to create user session",
 		})
 	}
+
+	// Store user info in locals for potential use by middleware/other handlers
+	c.Locals("user_email", req.Email)
+	c.Locals("session_token", sessionId)
+	c.Locals("authenticated", true)
+
 	// Return successful login response
 	return c.JSON(fiber.Map{
 		"message": "User logged in successfully",
@@ -136,16 +142,42 @@ func (ac *AuthController) Login(c *fiber.Ctx) error {
 
 // Logout handles user logout
 func (ac *AuthController) Logout(c *fiber.Ctx) error {
-	// TODO: Extract token from headers and invalidate session
+	// Get the Authorization header
+	authHeader := c.Get("Authorization")
+	if authHeader == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Authorization header required",
+		})
+	}
+
+	// Extract token from "Bearer <token>" format
+	var token string
+	token = authHeader
+
+	if token == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Invalid authorization format",
+		})
+	}
+
+	// Use the auth service to logout (delete session from Redis)
+	err := ac.authService.LogoutAPI(token)
+	if err != nil {
+		log.Printf("Failed to logout user: %v", err)
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "Invalid or expired session token",
+		})
+	}
+
 	return c.JSON(fiber.Map{
-		"message": "Logout endpoint - TODO: implement using authService",
+		"message": "Logout successful",
 	})
 }
 
 // GetCurrentUser returns current user information
 func (ac *AuthController) GetCurrentUser(c *fiber.Ctx) error {
-	// TODO: Extract token from headers and get user info
-	return c.JSON(fiber.Map{
-		"message": "Current user endpoint - TODO: implement using authService",
+	currentUser := c.Locals("user_email")
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"current_user": currentUser,
 	})
 }

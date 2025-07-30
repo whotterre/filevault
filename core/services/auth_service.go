@@ -27,6 +27,11 @@ var (
 	ErrSessionFileNotFound = errors.New("Session file not foundd")
 )
 
+const (
+	SESSION_FILE_PATH = "./vault_session"
+	CURRENT_USER_PATH = "./current_user"
+)
+
 type AuthService struct {
 	authRepo    repositories.UserRepository
 	sessionRepo repositories.SessionRepository
@@ -56,7 +61,7 @@ func (s *AuthService) Register(email, password string) error {
 		return ErrUserAlreadyExists
 	}
 	// If we get an error other than "user not found", that's a real error
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, sql.ErrNoRows) {
 		// Check if the error message contains "user not found" (custom error from repo)
 		if !strings.Contains(err.Error(), "user not found") {
 			return fmt.Errorf("error checking user existence: %w", err)
@@ -93,10 +98,6 @@ func (s *AuthService) Login(email, password string) error {
 	// Verify password
 	hash := pbkdf2.Key([]byte(password), []byte("salt"), 1000, 32, sha256.New)
 	hashedInputPassword := hex.EncodeToString(hash)
-	log.Println(hashedInputPassword)
-	log.Println(hash)
-	log.Println(hashedInputPassword == userHash)
-	log.Print(hashedInputPassword == userHash)
 	if hashedInputPassword != userHash {
 		return fmt.Errorf("invalid password")
 	}
@@ -142,6 +143,52 @@ func (s *AuthService) Login(email, password string) error {
 	fmt.Printf("Login successful. Your session ID is: %s\n", sessionID)
 	return nil
 }
+
+// Logout for CLI - deletes session from Redis and removes local files
+func (s *AuthService) Logout() error {
+	sessionFilePath := "./vault_session"
+	currentUserFilePath := "./current_user"
+	sessionIDBytes, err := os.ReadFile(sessionFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrSessionFileNotFound
+		}
+		return fmt.Errorf("failed to read session file %s: %w", sessionFilePath, err)
+	}
+	sessionID := string(sessionIDBytes)
+	deleted, err := s.sessionRepo.DeleteSession(context.Background(), sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to delete session from Redis: %w", err)
+	}
+	if !deleted {
+		// This means the session ID was not found in Redis, perhaps it expired or was already deleted.
+		fmt.Printf("Warning: Session ID '%s' not found in Redis, might have expired or already been logged out.\n", sessionID)
+	}
+
+	err = os.Remove(sessionFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File might have been manually deleted already, which is fine for logout.
+			fmt.Printf("Warning: Session file '%s' already removed locally.\n", sessionFilePath)
+		} else {
+			return fmt.Errorf("failed to delete local session file %s: %w", sessionFilePath, err)
+		}
+	}
+
+	err = os.Remove(currentUserFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File might have been manually deleted already, which is fine for logout.
+			fmt.Printf("Warning: Current user file '%s' already removed locally.\n", sessionFilePath)
+		} else {
+			return fmt.Errorf("failed to delete local session file %s: %w", sessionFilePath, err)
+		}
+	}
+	fmt.Println("Logged out successfully.")
+	return nil
+}
+
+/* API stuff from below here */
 
 // Logs in a user with basic auth
 func (s *AuthService) BasicAuthLogin(email, password string) (string, error) {
@@ -198,69 +245,55 @@ func (s *AuthService) BasicAuthLogin(email, password string) (string, error) {
 	return sessionID, nil
 }
 
-// Gets the user ID from Redis using the session token
-func (s *AuthService) getUserID(sessionToken string, conn *redis.Client) (string, error) {
-	ctx := context.Background()
-	email, err := conn.Get(ctx, sessionToken).Result()
-	if err != nil {
-		if err == redis.Nil {
-			return "", fmt.Errorf("Session token does not exist")
-		}
-		return "", fmt.Errorf("Error getting user ID: %v", err)
+// Logout for API - deletes session from Redis using provided token
+func (s *AuthService) LogoutAPI(sessionToken string) error {
+	if sessionToken == "" {
+		return errors.New("no session token provided")
 	}
 
-	// Query the database to get the user ID
-	var id string
-	err = s.authRepo.GetUserByEmail(ctx, email, &id)
-	if err != nil {
-		return "", fmt.Errorf("Error querying user ID: %v", err)
-	}
-	if id == "" {
-		return "", fmt.Errorf("User ID not found for email: %s", email)
-	}
-
-	return id, nil
-}
-
-func (s *AuthService) Logout() error {
-	sessionFilePath := "./vault_session"
-	currentUserFilePath := "./current_user"
-	sessionIDBytes, err := os.ReadFile(sessionFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return ErrSessionFileNotFound
-		}
-		return fmt.Errorf("failed to read session file %s: %w", sessionFilePath, err)
-	}
-	sessionID := string(sessionIDBytes)
-	deleted, err := s.sessionRepo.DeleteSession(context.Background(), sessionID)
+	// Delete session from Redis
+	deleted, err := s.sessionRepo.DeleteSession(context.Background(), sessionToken)
 	if err != nil {
 		return fmt.Errorf("failed to delete session from Redis: %w", err)
 	}
+
 	if !deleted {
-		// This means the session ID was not found in Redis, perhaps it expired or was already deleted.
-		fmt.Printf("Warning: Session ID '%s' not found in Redis, might have expired or already been logged out.\n", sessionID)
+		// Session token was not found in Redis, might have expired or already been deleted
+		return errors.New("session token not found or already expired")
 	}
 
-	err = os.Remove(sessionFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// File might have been manually deleted already, which is fine for logout.
-			fmt.Printf("Warning: Session file '%s' already removed locally.\n", sessionFilePath)
-		} else {
-			return fmt.Errorf("failed to delete local session file %s: %w", sessionFilePath, err)
-		}
-	}
-
-	err = os.Remove(currentUserFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// File might have been manually deleted already, which is fine for logout.
-			fmt.Printf("Warning: Current user file '%s' already removed locally.\n", sessionFilePath)
-		} else {
-			return fmt.Errorf("failed to delete local session file %s: %w", sessionFilePath, err)
-		}
-	}
-	fmt.Println("Logged out successfully.")
+	log.Printf("API logout successful for session token")
 	return nil
+}
+
+
+// ValidateToken validates a session token and returns the associated user email
+func (s *AuthService) ValidateToken(token string) (string, error) {
+	// For base64 encoded session tokens (email:password format)
+	// Decode the token to get email:password
+	decoded, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return "", fmt.Errorf("invalid token format: %w", err)
+	}
+
+	// Split email:password
+	credentials := string(decoded)
+	parts := strings.SplitN(credentials, ":", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid token structure")
+	}
+
+	email := parts[0]
+	// Check if session exists for this email
+	ctx := context.Background()
+	exists, err := s.sessionRepo.CheckSessionExists(ctx, email)
+	if err != nil {
+		return "", fmt.Errorf("error checking session: %w", err)
+	}
+
+	if !exists {
+		return "", fmt.Errorf("session not found or expired")
+	}
+
+	return email, nil
 }
