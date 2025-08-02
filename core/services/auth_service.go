@@ -246,13 +246,22 @@ func (s *AuthService) BasicAuthLogin(email, password string) (string, error) {
 }
 
 // Logout for API - deletes session from Redis using provided token
-func (s *AuthService) LogoutAPI(sessionToken string) error {
-	if sessionToken == "" {
-		return errors.New("no session token provided")
+func (s *AuthService) LogoutAPI(email string) error {
+	ctx := context.Background()
+	if email == "" {
+		return errors.New("you're not logged in.")
+	}
+	// Check session exists by said email
+	sessionExists, err := s.sessionRepo.CheckSessionExists(ctx, email)
+	if err != nil {
+		return fmt.Errorf("failed to check existence of session token from Redis: %w", err)
 	}
 
-	// Delete session from Redis
-	deleted, err := s.sessionRepo.DeleteSession(context.Background(), sessionToken)
+	if !sessionExists {
+		return fmt.Errorf("session token doesn't exist...you're not logged in.")
+	}
+	// Delete session from Redis using session token
+	deleted, err := s.sessionRepo.DeleteSessionByEmail(ctx, email)
 	if err != nil {
 		return fmt.Errorf("failed to delete session from Redis: %w", err)
 	}

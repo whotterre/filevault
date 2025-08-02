@@ -121,7 +121,7 @@ func (ac *AuthController) Login(c *fiber.Ctx) error {
 		})
 	}
 	// Create a session
-	err = ac.sessionRepo.CreateSession(ctx, req.Email, sessionId, 15*time.Minute)
+	err = ac.sessionRepo.CreateSession(ctx, req.Email, sessionId, 15 * time.Minute)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create user session",
@@ -143,32 +143,29 @@ func (ac *AuthController) Login(c *fiber.Ctx) error {
 // Logout handles user logout
 func (ac *AuthController) Logout(c *fiber.Ctx) error {
 	// Get the Authorization header
-	authHeader := c.Get("Authorization")
-	if authHeader == "" {
+	authToken := c.Get("X-Token")
+	if authToken == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Authorization header required",
 		})
 	}
 
-	// Extract token from "Bearer <token>" format
-	var token string
-	token = authHeader
-
-	if token == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Invalid authorization format",
-		})
-	}
+	email := c.Locals("user_email").(string)
 
 	// Use the auth service to logout (delete session from Redis)
-	err := ac.authService.LogoutAPI(token)
+	err := ac.authService.LogoutAPI(email)
 	if err != nil {
 		log.Printf("Failed to logout user: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 			"error": "Invalid or expired session token",
 		})
 	}
+	// Delete the state data from c.Locals
+	c.Locals("user_email", "")
+	c.Locals("session_token", "")
+	c.Locals("authenticated", false)
 
+	
 	return c.JSON(fiber.Map{
 		"message": "Logout successful",
 	})

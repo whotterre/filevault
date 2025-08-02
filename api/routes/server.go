@@ -69,12 +69,13 @@ func (s *APIServer) InitializeRoutes() *fiber.App {
 	authRoutes := app.Group("/auth")
 	authRoutes.Post("/register", authCtrl.Register)
 	authRoutes.Post("/login", authCtrl.Login)
-	authRoutes.Post("/logout", authCtrl.Logout)
+	
 
 	// Protected routes (authentication required)
 	protected := app.Group("/api")
 	// Add authentication middleware here
 	protected.Use(middleware.AuthMiddleware(s.authService))
+	protected.Get("/logout", authCtrl.Logout)
 	protected.Get("/users/me", authCtrl.GetCurrentUser)
 	// 	protected.GET("/files", s.ginHandleFiles)
 	// 	protected.POST("/files", s.ginHandleFiles)
