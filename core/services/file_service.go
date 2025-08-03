@@ -2,13 +2,15 @@ package services
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"core/repositories"
 	"core/utils"
 	worker "core/workers"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
+	"mime/multipart"
 	"os"
 	"regexp"
 	"time"
@@ -19,7 +21,7 @@ import (
 
 const (
 	DEFAULT_FOLDER_NAME = "default"
-	UPLOAD_FOLDER_PATH  = "./storage/uploads"
+	UPLOAD_FOLDER_PATH  = "../storage/uploads"
 )
 
 // Errors
@@ -237,9 +239,9 @@ func (s *FileService) UploadFile(pathname, parentID string) error {
 		err = s.taskDistributor.DistributeThumbnailGeneration(destinationPath, fileMetadata.FileId, ctx)
 		if err != nil {
 			// Don't fail the upload if thumbnail queueing fails - just log the error
-			fmt.Printf("⚠ Warning: Failed to queue thumbnail generation: %v\n", err)
+			fmt.Printf("Warning: Failed to queue thumbnail generation: %v\n", err)
 		} else {
-			fmt.Println("✓ Thumbnail generation queued")
+			fmt.Println("Thumbnail generation queued")
 		}
 	}
 
@@ -866,13 +868,119 @@ func (s *FileService) GetFileStats() (map[string]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	data["files"] = filesCount 
+	data["files"] = filesCount
 	// Users count first
 	usersCount, err := s.fileRepo.GetUsersCount(ctx)
 	if err != nil {
 		return nil, err
 	}
-	data["users"] = usersCount 
+	data["users"] = usersCount
 
 	return data, nil
-} 
+}
+
+func (s *FileService) UploadFileAPI(fileName, parentID, email string, file *multipart.FileHeader) (FileMetadata, error) {
+	ctx := context.Background()
+	// Ensure user is logged in
+	if fileName == "" {
+		return FileMetadata{}, ErrMissingPathname
+	}
+
+	// Open the uploaded file
+	uploadedFile, err := file.Open()
+	if err != nil {
+		return FileMetadata{}, err
+	}
+	defer uploadedFile.Close()
+
+	// Check that the uploads folder exists
+	if _, err := os.Stat(UPLOAD_FOLDER_PATH); os.IsNotExist(err) {
+		err = os.MkdirAll(UPLOAD_FOLDER_PATH, os.ModePerm)
+		if err != nil {
+			return FileMetadata{}, err
+		}
+	}
+
+	// Destination path
+	destinationPath := UPLOAD_FOLDER_PATH + "/" + file.Filename
+	destinationFile, err := os.Create(destinationPath)
+	if err != nil {
+		return FileMetadata{}, err
+	}
+	defer destinationFile.Close()
+
+	// Copy the content of the uploaded file to the new file
+	_, err = io.Copy(destinationFile, uploadedFile)
+	if err != nil {
+		return FileMetadata{}, err
+	}
+
+	// Get file type
+	fileType, err := s.determineFileType(destinationPath)
+	if err != nil {
+		return FileMetadata{}, err
+	}
+
+	// Get user id
+	userId, err := s.fileRepo.GetUserByEmail(ctx, email)
+	if err != nil {
+		return FileMetadata{}, err
+	}
+
+	log.Println(userId)
+
+	// Get file size
+	osStat, err := os.Stat(destinationPath)
+	if err != nil {
+		return FileMetadata{}, err
+	}
+
+	// Store the metadata of the file
+	fileMetadata := FileMetadata{
+		FileId:     uuid.New().String(),
+		FileName:   file.Filename,
+		Size:       osStat.Size(),
+		Path:       destinationPath,
+		UploadedAt: time.Now(),
+		FileType:   fileType,
+		ParentId:   parentID,
+	}
+
+	// Add database record of metadata
+	err = s.fileRepo.CreateFile(fileMetadata.FileId, fileMetadata.FileName,
+		userId, fileMetadata.Path, fileMetadata.FileType, fileMetadata.Size, parentID,
+		fileMetadata.UploadedAt)
+	if err != nil {
+		return FileMetadata{}, fmt.Errorf("failed to execute database statement: %w", err)
+	}
+
+	// Queue thumbnail generation if image
+	if fileType == "image" {
+		ctx := context.Background()
+		err = s.taskDistributor.DistributeThumbnailGeneration(destinationPath, fileMetadata.FileId, ctx)
+		if err != nil {
+			fmt.Printf("Warning: Failed to queue thumbnail generation: %v\n", err)
+		} else {
+			fmt.Println("Thumbnail generation queued")
+		}
+	}
+
+	// Update metadata.json
+	metadataPath := "../storage/metadata.json"
+	fileContent, err := os.ReadFile(metadataPath)
+	var metadataList []FileMetadata
+	if err == nil && len(fileContent) > 0 {
+		_ = json.Unmarshal(fileContent, &metadataList)
+	}
+	metadataList = append(metadataList, fileMetadata)
+	updatedMetadata, err := json.Marshal(metadataList)
+	if err != nil {
+		return FileMetadata{}, err
+	}
+	err = os.WriteFile(metadataPath, updatedMetadata, 0644)
+	if err != nil {
+		return FileMetadata{}, err
+	}
+
+	return fileMetadata, nil
+}

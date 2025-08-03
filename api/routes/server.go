@@ -57,6 +57,8 @@ func (s *APIServer) InitializeRoutes() *fiber.App {
 	// Initialize controllers with dependencies
 	authCtrl := controllers.NewAuthController(s.authRepo, s.fileRepo, s.sessionRepo,
 		s.fileService, s.authService, s.redisClient, s.taskDistributor)
+	fileCtrl := controllers.NewFileController(s.authRepo, s.fileRepo, s.sessionRepo,
+		 s.fileService, s.authService, s.redisClient, s.taskDistributor)
 	healthCtrl := controllers.NewHealthController(s.authRepo, s.fileRepo, s.sessionRepo,
 		s.fileService, s.authService, s.taskDistributor)
 
@@ -69,7 +71,6 @@ func (s *APIServer) InitializeRoutes() *fiber.App {
 	authRoutes := app.Group("/auth")
 	authRoutes.Post("/register", authCtrl.Register)
 	authRoutes.Post("/login", authCtrl.Login)
-	
 
 	// Protected routes (authentication required)
 	protected := app.Group("/api")
@@ -78,7 +79,7 @@ func (s *APIServer) InitializeRoutes() *fiber.App {
 	protected.Get("/logout", authCtrl.Logout)
 	protected.Get("/users/me", authCtrl.GetCurrentUser)
 	// 	protected.GET("/files", s.ginHandleFiles)
-	// 	protected.POST("/files", s.ginHandleFiles)
+	protected.Post("/files", fileCtrl.UploadFile)
 	// 	protected.GET("/files/:id", s.ginHandleFileByID)
 	// 	protected.DELETE("/files/:id", s.ginHandleFileByID)
 	// 	protected.GET("/folders", s.ginHandleFolders)

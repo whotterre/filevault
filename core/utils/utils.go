@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -117,4 +119,14 @@ func ToJSON(data map[string]any) ([]byte, error) {
 		return []byte(""), errors.New("Failed to serialize data as JSON")
 	}
 	return jsonData, nil
+}
+
+func ExtractEmailFromToken(authToken string) (string, error) {
+	// Convert from base64 to string
+	decoded, err := base64.StdEncoding.DecodeString(authToken)
+	if err != nil {
+		return "", fmt.Errorf("Failed to convert data from base 64 to string")
+	}
+	splitStr := strings.Split(string(decoded), ":")
+	return splitStr[0], nil
 }

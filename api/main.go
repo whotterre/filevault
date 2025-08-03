@@ -6,6 +6,7 @@ import (
 	"core/repositories"
 	"core/services"
 	worker "core/workers"
+	"fmt"
 	"log"
 
 	"github.com/hibiken/asynq"
@@ -30,6 +31,13 @@ func main() {
 	sessionRepo := repositories.NewSessionRepository(redisClient)
 	redisOpt := asynq.RedisClientOpt{Addr: "172.17.0.3:6379"}
 	taskDistributor := worker.NewRedisTaskDistributor(redisOpt)
+	taskProcessor := worker.NewRedisTaskProcessor(redisOpt, dbConn)
+	go func() {
+		fmt.Println("Starting task processor...")
+		if err := taskProcessor.Start(); err != nil {
+			fmt.Printf("Failed to start task processor: %v\n", err)
+		}
+	}()
 	// Initialize services
 	fileService := services.NewFileService(redisClient, fileRepo, taskDistributor)
 	authService := services.NewAuthService(redisClient, authRepo, sessionRepo)

@@ -131,7 +131,6 @@ func (ac *AuthController) Login(c *fiber.Ctx) error {
 	// Store user info in locals for potential use by middleware/other handlers
 	c.Locals("user_email", req.Email)
 	c.Locals("session_token", sessionId)
-	c.Locals("authenticated", true)
 
 	// Return successful login response
 	return c.JSON(fiber.Map{
